@@ -58,10 +58,10 @@ class MACrossoverStrategy(BaseStrategy):
         symbol = event.symbol
         n      = self.bar_count(symbol)
 
-        # Need slow MA on current and previous bar for crossover detection
-        if n < self.slow_period + 1:
+        # Need enough bars for the slow MA
+        if n < self.slow_period:
             logger.debug(
-                "%s: warming up (%d / %d bars)", symbol, n, self.slow_period + 1
+                "%s: warming up (%d / %d bars)", symbol, n, self.slow_period
             )
             return
 

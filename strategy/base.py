@@ -67,7 +67,6 @@ class BaseStrategy(ABC):
         Implement your signal logic here.
         Call self.emit_signal() to generate trading signals.
         """
-        a = 10
         raise NotImplementedError
 
     # ── Helpers ───────────────────────────────────────────────
