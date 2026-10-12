@@ -103,33 +103,39 @@ def run():
         engine      = engine,
     )
 
-    # 3. Wire event handlers
-    engine.register(EventType.BAR,    strategy.on_bar)
+    # 3. Track a DAILY equity curve (one point per trading day, recorded
+    #    when the date changes — before today's bars touch the prices)
+    equity_curve: list[float] = [INITIAL_CASH]
+    last_prices: dict[str, float] = {}
+    current = {"date": None}
+
+    def _track_equity(event: BarEvent):
+        d = event.timestamp.date()
+        if current["date"] is not None and d != current["date"]:
+            equity_curve.append(portfolio.total_equity(last_prices))
+        current["date"] = d
+
+    def _update_last_price(event: BarEvent):
+        last_prices[event.symbol] = event.close
+
+    # 4. Wire event handlers. Order matters: record equity, fill yesterday's
+    #    orders at today's open, update prices, then let the strategy react.
+    engine.register(EventType.BAR,    _track_equity)
+    engine.register(EventType.BAR,    broker.on_bar)
+    engine.register(EventType.BAR,    _update_last_price)
     engine.register(EventType.BAR,    _price_updater(broker, risk))   # keep prices fresh
+    engine.register(EventType.BAR,    strategy.on_bar)
     engine.register(EventType.SIGNAL, risk.on_signal)
     engine.register(EventType.ORDER,  broker.on_order)
     engine.register(EventType.FILL,   portfolio.on_fill)
 
-    # 4. Track equity curve
-    equity_curve: list[float] = [INITIAL_CASH]
-    last_prices: dict[str, float] = {}
-
-    def _track_equity(event: BarEvent):
-        last_prices[event.symbol] = event.close
-        equity_curve.append(portfolio.total_equity(last_prices))
-
-    engine.register(EventType.BAR, _track_equity)
-
     # 5. Run
     bars = historical_bar_feed(SYMBOLS, START_DATE, END_DATE)
     engine.start(iter(bars))
+    equity_curve.append(portfolio.total_equity(last_prices))
 
-    # 6. Results
-    fills = portfolio.fill_history
-    pnl_per_trade = []
-    for i in range(0, len(fills) - 1, 2):
-        entry, exit_ = fills[i], fills[i + 1]
-        pnl_per_trade.append(exit_.fill_price - entry.fill_price)
+    # 6. Results — per-trade P&L from the portfolio's closed-trade ledger
+    pnl_per_trade = portfolio.pnl_per_trade()
 
     print("\n" + "=" * 50)
     print("  BACKTEST RESULTS")

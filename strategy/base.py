@@ -36,6 +36,7 @@ class BaseStrategy(ABC):
         self.symbols = symbols
         self.engine  = engine                          # set after construction
         self._bars: dict[str, list[BarEvent]] = defaultdict(list)
+        self._current_ts = None                        # timestamp of the bar being processed
 
     # ── Lifecycle ─────────────────────────────────────────────
 
@@ -59,6 +60,7 @@ class BaseStrategy(ABC):
         if event.symbol not in self.symbols:
             return
         self._bars[event.symbol].append(event)
+        self._current_ts = event.timestamp
         self.calculate(event)
 
     @abstractmethod
@@ -77,14 +79,21 @@ class BaseStrategy(ABC):
         direction: SignalDirection,
         strength: float = 1.0,
     ) -> None:
-        """Push a SignalEvent onto the engine queue."""
+        """
+        Push a SignalEvent onto the engine queue.
+
+        The signal is stamped with the timestamp of the bar that produced it,
+        so backtest signals, orders and fills carry market time, not wall-clock time.
+        """
         if self.engine is None:
             raise RuntimeError("Strategy has no engine attached. Call set_engine().")
+        extra = {"timestamp": self._current_ts} if self._current_ts is not None else {}
         signal = SignalEvent(
             symbol    = symbol,
             direction = direction,
             strength  = max(0.0, min(1.0, strength)),
             strategy  = self.name,
+            **extra,
         )
         self.engine.put(signal)
 

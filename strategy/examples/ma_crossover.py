@@ -58,8 +58,8 @@ class MACrossoverStrategy(BaseStrategy):
         symbol = event.symbol
         n      = self.bar_count(symbol)
 
-        # Need enough bars for the slow MA
-        if n < self.slow_period:
+        # Need enough bars for the slow MA on this bar AND the previous one
+        if n <= self.slow_period:
             logger.debug(
                 "%s: warming up (%d / %d bars)", symbol, n, self.slow_period
             )

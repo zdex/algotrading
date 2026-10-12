@@ -77,7 +77,7 @@ class RiskManager:
 
         # 2. Flat signal → close position
         if event.direction == SignalDirection.FLAT:
-            self._close_position(event.symbol)
+            self._close_position(event.symbol, event.timestamp)
             return
 
         # 3. Position count check
@@ -115,6 +115,7 @@ class RiskManager:
             order_type = OrderType.MARKET,
             quantity   = round(quantity, 6),
             order_id   = str(uuid.uuid4())[:8],
+            timestamp  = event.timestamp,      # market time of the signal, not wall-clock
         )
 
         logger.info(
@@ -125,7 +126,7 @@ class RiskManager:
 
     # ── Helpers ───────────────────────────────────────────────
 
-    def _close_position(self, symbol: str) -> None:
+    def _close_position(self, symbol: str, ts=None) -> None:
         pos = self.portfolio.positions.get(symbol)
         if not pos or pos.quantity == 0:
             return
@@ -138,6 +139,7 @@ class RiskManager:
             order_type = OrderType.MARKET,
             quantity   = quantity,
             order_id   = str(uuid.uuid4())[:8],
+            **({"timestamp": ts} if ts is not None else {}),
         )
         logger.info("CLOSING position in %s: %s x%.4f", symbol, side.value, quantity)
         self.engine.put(order)

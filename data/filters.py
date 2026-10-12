@@ -10,16 +10,24 @@ Filters
 - History    : minimum number of trading days available
 - Volatility : optional — remove extremely volatile names
 
+Point-in-time
+-------------
+Pass `as_of` (normally the backtest start date) so every check only uses
+data from before that date. Without it the filter uses the last rows of the
+cache, i.e. it selects symbols using liquidity and prices from the END of
+the backtest, which is look-ahead.
+
 Usage
 -----
     from data.filters import LiquidityFilter
     filt   = LiquidityFilter(feed)
-    liquid = filt.apply(symbols)
+    liquid = filt.apply(symbols, as_of="2021-01-01")
     print(f"{len(liquid)} / {len(symbols)} symbols passed.")
 """
 
 import logging
 from dataclasses import dataclass
+from typing import Optional
 
 import pandas as pd
 
@@ -50,15 +58,17 @@ class LiquidityFilter:
         self.cfg    = config or FilterConfig()
         self._log: dict[str, str] = {}    # symbol → rejection reason
 
-    def apply(self, symbols: list[str]) -> list[str]:
+    def apply(self, symbols: list[str], as_of: Optional[str] = None) -> list[str]:
         """
-        Returns the subset of symbols that pass all filters.
+        Returns the subset of symbols that pass all filters, using only
+        data strictly before `as_of` when given.
         Populates self._log with rejection reasons.
         """
         passed, rejected = [], []
+        self._log = {}
 
         for symbol in symbols:
-            reason = self._check(symbol)
+            reason = self._check(symbol, as_of)
             if reason is None:
                 passed.append(symbol)
             else:
@@ -79,9 +89,11 @@ class LiquidityFilter:
 
     # ── Per-symbol checks ─────────────────────────────────────
 
-    def _check(self, symbol: str) -> str | None:
+    def _check(self, symbol: str, as_of: Optional[str] = None) -> str | None:
         """Returns rejection reason string, or None if symbol passes."""
         df = self.feed.load_ohlcv(symbol)
+        if df is not None and as_of is not None:
+            df = df[df.index < pd.Timestamp(as_of)]
 
         # 1. Data availability
         if df is None or df.empty:

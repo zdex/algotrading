@@ -157,17 +157,21 @@ class PrecomputedSignalStrategy(BaseStrategy):
         self._signals = signals.copy()
         self._signals.index = pd.to_datetime(self._signals.index).normalize()
         self._last_signal: dict[str, str] = {}
+        # Plain-Python lookup tables: DataFrame.at per bar is the slowest part of a run
+        self._row = {ts: i for i, ts in enumerate(self._signals.index)}
+        self._col = {sym: j for j, sym in enumerate(self._signals.columns)}
+        self._values = self._signals.to_numpy(dtype=object)
 
     def calculate(self, event: BarEvent) -> None:
         symbol = event.symbol
         date   = pd.Timestamp(event.timestamp).normalize()
 
-        if date not in self._signals.index:
-            return
-        if symbol not in self._signals.columns:
+        i = self._row.get(date)
+        j = self._col.get(symbol)
+        if i is None or j is None:
             return
 
-        new_sig = self._signals.at[date, symbol]
+        new_sig = self._values[i, j]
         if not new_sig or new_sig == self._last_signal.get(symbol):
             return   # no change
 

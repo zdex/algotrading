@@ -3,16 +3,39 @@ core/portfolio.py
 -----------------
 Tracks positions, cash, and P&L in real time.
 Updated exclusively by FillEvents from the broker.
+
+Every time a fill reduces or closes a position, a closed-trade record is
+added to `Portfolio.trades`. That ledger is the source of truth for
+per-trade P&L, win rate and the UI's trade log (pairing consecutive fills
+does not work once many symbols trade at the same time).
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from core.events import FillEvent, OrderSide
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Trade:
+    """One closed (or partially closed) round trip in a single symbol."""
+    symbol:      str
+    direction:   str            # "LONG" or "SHORT"
+    entry_time:  Optional[datetime]
+    exit_time:   datetime
+    quantity:    float          # quantity closed (always positive)
+    entry_price: float          # average entry price of the closed quantity
+    exit_price:  float
+    gross_pnl:   float
+    commission:  float          # entry share + exit share of commissions
+    net_pnl:     float
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 @dataclass
@@ -21,6 +44,8 @@ class Position:
     quantity:   float = 0.0       # positive = long, negative = short
     avg_price:  float = 0.0
     realised_pnl: float = 0.0
+    opened_at:  Optional[datetime] = None
+    entry_commission: float = 0.0  # commissions paid on the still-open quantity
 
     def market_value(self, current_price: float) -> float:
         return self.quantity * current_price
@@ -28,29 +53,68 @@ class Position:
     def unrealised_pnl(self, current_price: float) -> float:
         return self.quantity * (current_price - self.avg_price)
 
-    def update(self, fill: FillEvent) -> None:
-        """Update position after a fill."""
+    def update(self, fill: FillEvent) -> Optional[Trade]:
+        """
+        Update position after a fill.
+
+        Returns a Trade when the fill reduced, closed or reversed the
+        position, otherwise None.
+        """
         signed_qty = fill.quantity if fill.side == OrderSide.BUY else -fill.quantity
+        if signed_qty == 0:
+            return None
 
-        if self.quantity == 0:
-            self.avg_price = fill.fill_price
-        elif (self.quantity > 0) == (signed_qty > 0):
-            # Adding to existing position — recalculate avg
-            total_cost  = self.avg_price * self.quantity + fill.fill_price * signed_qty
+        # ── Opening or adding ─────────────────────────────────
+        if self.quantity == 0 or (self.quantity > 0) == (signed_qty > 0):
+            if self.quantity == 0:
+                self.avg_price = fill.fill_price
+                self.opened_at = fill.timestamp
+            else:
+                total_cost = self.avg_price * self.quantity + fill.fill_price * signed_qty
+                self.avg_price = total_cost / (self.quantity + signed_qty)
             self.quantity += signed_qty
-            self.avg_price = total_cost / self.quantity if self.quantity else 0
-            return
-        else:
-            # Reducing or reversing
-            closed_qty = min(abs(self.quantity), abs(signed_qty))
-            pnl = closed_qty * (fill.fill_price - self.avg_price)
-            if self.quantity < 0:
-                pnl = -pnl
-            self.realised_pnl += pnl
+            self.entry_commission += fill.commission
+            return None
 
+        # ── Reducing, closing or reversing ────────────────────
+        closed_qty = min(abs(self.quantity), abs(signed_qty))
+        direction  = "LONG" if self.quantity > 0 else "SHORT"
+        gross = closed_qty * (fill.fill_price - self.avg_price)
+        if self.quantity < 0:
+            gross = -gross
+        self.realised_pnl += gross
+
+        # Allocate commissions to the closed quantity
+        entry_share = self.entry_commission * closed_qty / abs(self.quantity)
+        exit_share  = fill.commission * closed_qty / abs(signed_qty)
+        self.entry_commission -= entry_share
+
+        trade = Trade(
+            symbol      = self.symbol,
+            direction   = direction,
+            entry_time  = self.opened_at,
+            exit_time   = fill.timestamp,
+            quantity    = closed_qty,
+            entry_price = self.avg_price,
+            exit_price  = fill.fill_price,
+            gross_pnl   = gross,
+            commission  = entry_share + exit_share,
+            net_pnl     = gross - entry_share - exit_share,
+        )
+
+        old_qty = self.quantity
         self.quantity += signed_qty
-        if self.quantity == 0:
+        if abs(self.quantity) < 1e-9:
+            self.quantity = 0.0
             self.avg_price = 0.0
+            self.opened_at = None
+            self.entry_commission = 0.0
+        elif (old_qty > 0) != (self.quantity > 0):
+            # Reversed through zero: the remainder is a fresh position at the fill price
+            self.avg_price = fill.fill_price
+            self.opened_at = fill.timestamp
+            self.entry_commission = fill.commission - exit_share
+        return trade
 
 
 @dataclass
@@ -59,6 +123,7 @@ class Portfolio:
     cash: float = field(init=False)
     positions: Dict[str, Position] = field(default_factory=dict)
     fill_history: List[FillEvent] = field(default_factory=list)
+    trades: List[Trade] = field(default_factory=list)
 
     def __post_init__(self):
         self.cash = self.initial_cash
@@ -71,7 +136,9 @@ class Portfolio:
         if symbol not in self.positions:
             self.positions[symbol] = Position(symbol=symbol)
 
-        self.positions[symbol].update(event)
+        trade = self.positions[symbol].update(event)
+        if trade is not None:
+            self.trades.append(trade)
         self.cash -= event.net_cost
         self.fill_history.append(event)
 
@@ -92,6 +159,13 @@ class Portfolio:
 
     def total_realised_pnl(self) -> float:
         return sum(p.realised_pnl for p in self.positions.values())
+
+    def pnl_per_trade(self, net: bool = True) -> List[float]:
+        """Per-trade P&L from the closed-trade ledger (net of commissions by default)."""
+        return [t.net_pnl if net else t.gross_pnl for t in self.trades]
+
+    def open_positions(self) -> Dict[str, Position]:
+        return {s: p for s, p in self.positions.items() if p.quantity != 0}
 
     def summary(self, prices: Dict[str, float]) -> dict:
         equity = self.total_equity(prices)
