@@ -31,6 +31,7 @@ pages = {
         st.Page(views / "phase1.py", title="Phase 1 Validation", icon=":material/fact_check:"),
     ],
     "Trading": [
+        st.Page(views / "paper.py", title="Paper Trading", icon=":material/trending_up:"),
         st.Page(views / "live.py", title="Live Trading", icon=":material/sensors:"),
     ],
     "Data": [
@@ -40,7 +41,7 @@ pages = {
 nav = st.navigation(pages)
 
 with st.sidebar:
-    st.markdown(":blue-badge[:material/description: PAPER]  :gray-badge[Live: not connected]")
+    st.markdown(":blue-badge[:material/description: PAPER]  :gray-badge[Sandbox mode]")
     options = ["Real data", "Sample data"]
     state.cache_dir()   # initialises the default choice
     st.radio(
