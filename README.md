@@ -9,6 +9,7 @@ risk management, IBKR paper trading, plus a Streamlit UI.
 cd C:\Users\gmahe\Gaurav_folder\Gaurav_study\Investments\Projects\algotrading
 python -m venv .venv
 .venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip # to upgrade pip
 pip install -r requirements.txt
 
 # 1. Run the large-universe backtest (downloads data the first time, several minutes)
