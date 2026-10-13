@@ -8,11 +8,17 @@ html5lib>=1.1
 
 # Streamlit UI
 streamlit>=1.50
+streamlit-autorefresh>=0.1.1
 plotly>=5.20
 
-# Phase 2 (IBKR paper trading) — files not part of this upload
+# IBKR / execution
 ib_insync>=0.9.86
 apscheduler>=3.10
+nest_asyncio>=1.5.6
+tzlocal>=5.0
+
+# Utilities
+requests>=2.31
 
 # Tests
 pytest>=8

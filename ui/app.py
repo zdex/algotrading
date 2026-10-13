@@ -22,6 +22,7 @@ views = ROOT / "ui" / "views"
 pages = {
     "Overview": [
         st.Page(views / "home.py", title="Command Center", icon=":material/dashboard:", default=True),
+        st.Page(views / "portfolio.py", title="Portfolio", icon=":material/account_balance_wallet:"),
     ],
     "Research": [
         st.Page(views / "backtest_lab.py", title="Backtest Lab", icon=":material/science:"),
