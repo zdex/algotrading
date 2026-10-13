@@ -2,6 +2,17 @@
 
 Event-driven algorithmic trading system (Python): large-universe backtesting,
 risk management, IBKR paper trading, plus a Streamlit UI.
+# Analysis
+Fundamental Analysis - 
+   company analysis
+   results analysis
+   Company news analysis
+Technical Analysis, sentiment analysis
+Social media, news, web,
+
+Chatbot where user can upload documents and ask questions about the document, about his own porfolio, his own historical 
+trades, ask about company news.
+Agents ?
 
 ## Quick start (Windows PowerShell)
 
