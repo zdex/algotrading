@@ -146,8 +146,13 @@ if uploaded_files:
             texts.append(text)
             metadata.append({"source": str(save_path), "filename": filename})
 
-        res = rag_qdrant.index_texts(texts, metadatas=metadata)
-        st.success(f"Indexed {res.get('count', 0)} documents.")
+        try:
+            res = rag_qdrant.index_texts(texts, metadatas=metadata)
+            st.success(f"Indexed {res.get('count', 0)} documents.")
+        except Exception as e:
+            # If Qdrant (or other services) are unavailable, show a clear error
+            st.error(f"Indexing failed: {e}")
+            res = {"status": "error", "count": 0, "error": str(e)}
 
 st.subheader("Ask the analyst")
 query = st.text_area(
