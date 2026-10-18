@@ -19,6 +19,7 @@ import streamlit as st  # noqa: E402
 
 from ui.components import state  # noqa: E402
 from ui.components import theme  # noqa: E402,F401  (registers the Plotly template)
+from ui.components.llm_picker import render_llm_picker  # noqa: E402
 
 st.set_page_config(page_title="Algo Trading", page_icon=":material/monitoring:", layout="wide")
 
@@ -44,9 +45,17 @@ pages = {
         st.Page(views / "universe_data.py", title="Universe & Data", icon=":material/database:"),
     ],
 }
-nav = st.navigation(pages)
+# Hidden so we can put the AI model dropdown above the Overview section.
+nav = st.navigation(pages, position="hidden")
 
 with st.sidebar:
+    render_llm_picker()
+    st.divider()
+    for section, section_pages in pages.items():
+        st.caption(section)
+        for page in section_pages:
+            st.page_link(page)
+    st.divider()
     st.markdown(":blue-badge[:material/description: PAPER]  :gray-badge[Sandbox mode]")
     options = ["Real data", "Sample data"]
     state.cache_dir()   # initialises the default choice

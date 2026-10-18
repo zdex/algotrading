@@ -163,7 +163,12 @@ query = st.text_area(
 if st.button("Ask the agent") and query:
     with st.spinner("Retrieving relevant docs and building context..."):
         portfolio_context = build_live_portfolio_context()
-        retrieval = rag_qdrant.query(query, top_k=5)
+        retrieval = rag_qdrant.query(
+            query,
+            top_k=5,
+            provider=st.session_state.get("llm_provider"),
+            model=st.session_state.get("llm_model"),
+        )
         context_text = (
             (retrieval.get("docs", []) and "\n\n".join(d.get("text", "") for d in retrieval.get("docs", [])))
             + "\n\n" + portfolio_context
@@ -196,13 +201,14 @@ if st.button("Ask the agent") and query:
         st.json(workflow)
 
         if retrieval.get("answer"):
+            provider = st.session_state.get("llm_provider", "openai")
+            model = st.session_state.get("llm_model", "")
             st.subheader("Answer")
+            if model:
+                st.caption(f"Model: {provider} · {model}")
             st.write(retrieval["answer"])
         else:
-            st.info(
-                "No valid OPENAI_API_KEY found. Put a real key in the project `.env` "
-                "(not `sk-your-api-key-here`) and restart Streamlit."
-            )
+            st.info("The selected model did not return an answer.")
 
 # Module cards
 st.subheader("Analysis capability map")

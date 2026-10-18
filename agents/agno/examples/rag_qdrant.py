@@ -7,13 +7,12 @@ Usage:
 
 Notes:
  - Uses `sentence-transformers` for embeddings and `qdrant-client` for storage.
- - If `OPENAI_API_KEY` is set, `query()` will call OpenAI to synthesize an answer from retrieved docs.
+ - `query()` synthesizes an answer with the selected OpenAI, Gemini, or Ollama model.
 """
-from pathlib import Path
 import os
 from typing import List, Dict, Any, Optional
 
-from agents.agno.config import openai_api_key
+from agents.agno.llm import generate as generate_llm, parse_choice_id
 
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
@@ -22,11 +21,6 @@ import numpy as np
 
 # Simple in-memory fallback store when Qdrant is not available during development.
 _IN_MEMORY_STORE: dict = {"points": [], "dim": None}
-
-try:
-    import openai
-except Exception:
-    openai = None
 
 
 INDEX_NAME = "algotrading_docs"
@@ -91,48 +85,20 @@ def index_texts(texts: List[str], metadatas: Optional[List[Dict[str, Any]]] = No
         return {"status": "fallback_indexed", "count": len(texts)}
 
 
-def _generate_answer(prompt: str, q: str) -> Optional[str]:
-    """Generate a final answer using the configured OpenAI client.
-
-    Supports both the modern `openai>=1.0` client (`OpenAI().chat.completions.create`)
-    and legacy `openai<1.0` (`Completion.create`) so the app keeps working across
-    environments without requiring a full dependency pin.
-    """
-    if not openai:
-        return None
-
-    api_key = openai_api_key()
-    if not api_key:
-        return None
-
-    try:
-        if hasattr(openai, "OpenAI"):
-            client = openai.OpenAI(api_key=api_key)
-            model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=256,
-                temperature=0.0,
-            )
-            content = resp.choices[0].message.content
-            return content.strip() if content else None
-
-        # Backward-compatible fallback for old OpenAI SDKs.
-        resp = openai.Completion.create(
-            model=os.getenv("OPENAI_MODEL", "text-davinci-003"),
-            prompt=prompt,
-            max_tokens=256,
-            temperature=0.0,
-        )
-        return resp.choices[0].text.strip()
-    except Exception as e:
-        return f"LLM error: {e}"
+def _generate_answer(prompt: str, provider: Optional[str] = None, model: Optional[str] = None) -> str:
+    """Generate a final answer with the selected OpenAI, Gemini, or Ollama model."""
+    if provider and model:
+        choice = parse_choice_id(f"{provider}:{model}")
+    else:
+        fallback = os.getenv("LLM_CHOICE") or f"openai:{os.getenv('OPENAI_MODEL', 'gpt-4o-mini')}"
+        choice = parse_choice_id(fallback)
+    return generate_llm(prompt, provider=choice.provider, model=choice.model)
 
 
-def query(q: str, top_k: int = 3) -> Dict[str, Any]:
-    model = _emb_model()
-    emb = model.encode([q])[0]
+def query(q: str, top_k: int = 3, provider: Optional[str] = None, model: Optional[str] = None) -> Dict[str, Any]:
+    llm_model = model
+    embedder = _emb_model()
+    emb = embedder.encode([q])[0]
     # First try Qdrant; if unavailable, use the in-memory store.
     try:
         client = _qdrant_client()
@@ -158,12 +124,12 @@ def query(q: str, top_k: int = 3) -> Dict[str, Any]:
             p = _IN_MEMORY_STORE["points"][int(idx)]
             docs.append({"id": p["id"], "score": float(sims[int(idx)]), **p["payload"]})
 
-    answer = None
-    if openai and openai_api_key():
-        # simple prompt: provide context and ask model to answer
-        ctx = "\n\n".join([d.get("text", "") for d in docs])
-        prompt = f"You are an assistant. Use the context to answer the question.\nContext:\n{ctx}\n---\nQuestion: {q}\nAnswer:"
-        answer = _generate_answer(prompt, q)
+    ctx = "\n\n".join([d.get("text", "") for d in docs])
+    prompt = (
+        "You are an assistant. Use the context to answer the question.\n"
+        f"Context:\n{ctx}\n---\nQuestion: {q}\nAnswer:"
+    )
+    answer = _generate_answer(prompt, provider=provider, model=llm_model)
 
     return {"query": q, "docs": docs, "answer": answer}
 

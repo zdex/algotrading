@@ -42,11 +42,15 @@ def load_env() -> None:
             os.environ[name] = value
 
 
-def openai_api_key() -> str | None:
-    key = (os.getenv("OPENAI_API_KEY") or "").strip()
+def env_secret(name: str) -> str | None:
+    key = (os.getenv(name) or "").strip()
     if _is_placeholder_key(key):
         return None
     return key
+
+
+def openai_api_key() -> str | None:
+    return env_secret("OPENAI_API_KEY")
 
 
 load_env()
