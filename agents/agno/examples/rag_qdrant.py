@@ -13,6 +13,8 @@ from pathlib import Path
 import os
 from typing import List, Dict, Any, Optional
 
+from agents.agno.config import openai_api_key
+
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
@@ -99,7 +101,7 @@ def _generate_answer(prompt: str, q: str) -> Optional[str]:
     if not openai:
         return None
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = openai_api_key()
     if not api_key:
         return None
 
@@ -157,7 +159,7 @@ def query(q: str, top_k: int = 3) -> Dict[str, Any]:
             docs.append({"id": p["id"], "score": float(sims[int(idx)]), **p["payload"]})
 
     answer = None
-    if openai and os.getenv("OPENAI_API_KEY"):
+    if openai and openai_api_key():
         # simple prompt: provide context and ask model to answer
         ctx = "\n\n".join([d.get("text", "") for d in docs])
         prompt = f"You are an assistant. Use the context to answer the question.\nContext:\n{ctx}\n---\nQuestion: {q}\nAnswer:"

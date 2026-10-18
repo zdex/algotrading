@@ -11,6 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from agents.agno.config import load_env  # noqa: E402
+
+load_env()
+
 import streamlit as st  # noqa: E402
 
 from ui.components import state  # noqa: E402

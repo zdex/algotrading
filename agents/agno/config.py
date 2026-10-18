@@ -1,5 +1,55 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
+import os
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _is_placeholder_key(value: str) -> bool:
+    key = (value or "").strip().lower()
+    if not key:
+        return True
+    return (
+        key.startswith("sk-your-")
+        or "your-api-key" in key
+        or key in {"changeme", "replace-me", "none", "null"}
+    )
+
+
+def _parse_dotenv(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.is_file():
+        return values
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        name, _, raw = stripped.partition("=")
+        name = name.strip()
+        value = raw.strip().strip("'").strip('"')
+        if name:
+            values[name] = value
+    return values
+
+
+def load_env() -> None:
+    """Load project `.env`, replacing missing or placeholder values."""
+    for name, value in _parse_dotenv(ROOT / ".env").items():
+        current = os.environ.get(name, "")
+        if name not in os.environ or _is_placeholder_key(current):
+            os.environ[name] = value
+
+
+def openai_api_key() -> str | None:
+    key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if _is_placeholder_key(key):
+        return None
+    return key
+
+
+load_env()
 
 
 @dataclass

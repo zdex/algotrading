@@ -199,7 +199,10 @@ if st.button("Ask the agent") and query:
             st.subheader("Answer")
             st.write(retrieval["answer"])
         else:
-            st.info("No OpenAI key configured, so no synthesized answer is available yet. For now, the workflow output is shown above.")
+            st.info(
+                "No valid OPENAI_API_KEY found. Put a real key in the project `.env` "
+                "(not `sk-your-api-key-here`) and restart Streamlit."
+            )
 
 # Module cards
 st.subheader("Analysis capability map")
