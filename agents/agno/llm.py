@@ -39,6 +39,10 @@ PROVIDER_LABELS = {
 }
 
 
+DEFAULT_CHOICE_PROVIDER = "ollama"
+DEFAULT_CHOICE_MODEL = "llama3.1:8b"
+
+
 @dataclass(frozen=True)
 class LLMChoice:
     provider: str
@@ -96,7 +100,7 @@ def parse_choice_id(choice_id: str | None) -> LLMChoice:
         model = model.strip()
         if provider in PROVIDER_LABELS and model:
             return LLMChoice(provider, model)
-    return LLMChoice("openai", DEFAULT_OPENAI_MODELS[0])
+    return LLMChoice(DEFAULT_CHOICE_PROVIDER, DEFAULT_CHOICE_MODEL)
 
 
 def ollama_timeout_seconds() -> float:

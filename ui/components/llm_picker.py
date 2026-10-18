@@ -15,15 +15,17 @@ def render_llm_picker() -> llm_runtime.LLMChoice:
     choices = llm_runtime.available_choices(_ollama_models())
     ids = [choice.id for choice in choices]
     labels = {choice.id: choice.label for choice in choices}
-    current = st.session_state.get("llm_choice_id", ids[0])
-    index = ids.index(current) if current in ids else 0
+    default_id = f"{llm_runtime.DEFAULT_CHOICE_PROVIDER}:{llm_runtime.DEFAULT_CHOICE_MODEL}"
+    if "llm_choice_id" not in st.session_state:
+        st.session_state.llm_choice_id = default_id if default_id in ids else ids[0]
+    elif st.session_state.llm_choice_id not in ids:
+        st.session_state.llm_choice_id = default_id if default_id in ids else ids[0]
     selected_id = st.selectbox(
         "AI model",
         ids,
-        index=index,
         format_func=labels.get,
         key="llm_choice_id",
-        help="Used by Analysis Q&A. OpenAI and Gemini need API keys in `.env`; Ollama talks to a local server.",
+        help="Used by company signals and Analysis Q&A. OpenAI and Gemini need API keys in `.env`; Ollama talks to a local server.",
     )
     choice = llm_runtime.parse_choice_id(selected_id)
     st.session_state.llm_provider = choice.provider

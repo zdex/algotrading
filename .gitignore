@@ -218,4 +218,5 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 data/sample_cache/
+data/agents/research/
 results/

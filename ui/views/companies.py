@@ -3,14 +3,15 @@
 import pandas as pd
 import streamlit as st
 
-from agents.agno.company_analysis_agent import CompanyAnalysisAgent
+from agents.agno.company_analysis_agent import MAX_COMPANIES, CompanyAnalysisAgent
 from data.universe import load_company_directory
 from ui.components import state
 
 st.title("Companies")
 st.caption(
-    "S&P 500, NASDAQ-100, and Dow 30. Select names and submit them to the analysis agent. "
-    "This phase records the basket and returns a placeholder signal. It does not call a model."
+    "S&P 500, NASDAQ-100, and Dow 30. Select up to "
+    f"{MAX_COMPANIES} companies and submit them. The analysis agent collects SEC filings, "
+    "recent news, and X posts, then the selected model scores each name long, short, or flat."
 )
 
 INDEX_FILTERS = {
@@ -113,7 +114,8 @@ st.session_state.selected_company_symbols = sorted(selected)
 
 st.caption(f"{len(selected)} selected · {len(view)} shown")
 
-action_col, clear_col = st.columns([1, 4])
+action_col, cache_col, clear_col = st.columns([1.2, 1.4, 3])
+use_cache = cache_col.checkbox("Use cached research", value=True)
 run = action_col.button("Submit for analysis", type="primary", icon=":material/play_arrow:")
 if clear_col.button("Clear selection"):
     st.session_state.selected_company_symbols = []
@@ -134,20 +136,91 @@ if selected:
 if run:
     if not selected:
         st.warning("Select at least one company.")
+    elif len(selected) > MAX_COMPANIES:
+        st.warning(f"Select at most {MAX_COMPANIES} companies for one research run.")
     else:
         picked = directory[directory["symbol"].isin(selected)].sort_values("name")
         payload = [
             {"symbol": row.symbol, "name": row.name, "indexes": row.indexes}
             for row in picked.itertuples(index=False)
         ]
-        with st.spinner("Running the analysis agent…"):
-            report = CompanyAnalysisAgent().analyze(payload)
+        status = st.empty()
+
+        def _progress(index: int, total: int, symbol: str) -> None:
+            status.caption(f"Researching and scoring {symbol} ({index} of {total})")
+
+        with st.spinner("Collecting evidence and scoring signals…"):
+            report = CompanyAnalysisAgent().analyze(
+                payload,
+                use_cache=use_cache,
+                provider=st.session_state.get("llm_provider"),
+                model=st.session_state.get("llm_model"),
+                progress=_progress,
+            )
+        status.empty()
         st.session_state.company_analysis = report.to_dict()
+
+
+def _render_evidence(evidence: list[dict]) -> None:
+    if not evidence:
+        return
+    st.subheader("Research")
+    for company in evidence:
+        label = f"{company.get('name', '')} ({company.get('symbol', '')})"
+        if company.get("cached"):
+            label += " · cached"
+        with st.expander(label, expanded=len(evidence) == 1):
+            for error in company.get("errors") or []:
+                st.warning(error)
+            st.markdown("**Filings**")
+            _records(
+                company.get("filings") or [],
+                ["form", "period_end", "filed_at", "source", "url"],
+                {"form": "Form", "period_end": "Period end", "filed_at": "Filed", "source": "Source", "url": "Document"},
+            )
+            st.markdown("**News**")
+            _records(
+                company.get("news") or [],
+                ["published_at", "source", "title", "url"],
+                {"published_at": "Published", "source": "Source", "title": "Headline", "url": "Link"},
+            )
+            st.markdown("**Social**")
+            _records(
+                company.get("social") or [],
+                ["posted_at", "author", "sentiment", "score", "text", "url"],
+                {
+                    "posted_at": "Posted",
+                    "author": "Author",
+                    "sentiment": "Sentiment",
+                    "score": "Score",
+                    "text": "Post",
+                    "url": "Link",
+                },
+            )
+
+
+def _records(rows: list[dict], columns: list[str], labels: dict[str, str]) -> None:
+    if not rows:
+        st.caption("Nothing collected.")
+        return
+    frame = pd.DataFrame(rows)
+    keep = [column for column in columns if column in frame.columns]
+    config = {}
+    for column in keep:
+        if column == "url":
+            config[column] = st.column_config.LinkColumn(labels[column], display_text="Open")
+        elif column == "score":
+            config[column] = st.column_config.NumberColumn(labels[column], format="%.2f")
+        else:
+            config[column] = labels[column]
+    st.dataframe(frame[keep], hide_index=True, width="stretch", column_config=config)
+
 
 report = st.session_state.get("company_analysis")
 if report:
     st.subheader("Analysis")
-    st.info(report["note"], icon=":material/pending:")
+    icon = ":material/check_circle:" if report.get("llm_called") else ":material/pending:"
+    st.info(report["note"], icon=icon)
     m1, m2, m3 = st.columns(3)
     m1.metric("Companies", report["company_count"], border=True)
     m2.metric("Status", report["status"], border=True)
@@ -171,3 +244,5 @@ if report:
                 "rationale": "Rationale",
             },
         )
+
+    _render_evidence(report.get("evidence") or [])
