@@ -5,8 +5,13 @@ Fetches index constituents for S&P 500, NASDAQ-100, and Dow Jones.
 Uses a browser User-Agent to avoid Wikipedia's 403 block.
 """
 
+import html
+import json
 import logging
 import io
+import os
+import re
+import subprocess
 import urllib.request
 import pandas as pd
 from typing import Optional
@@ -23,11 +28,28 @@ _HEADERS = {
 }
 
 
+def _fetch_html(url: str) -> bytes:
+    """Download a public page. Falls back to the OS trust store when Python's CA bundle fails."""
+    req = urllib.request.Request(url, headers=_HEADERS)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return resp.read()
+    except Exception as exc:
+        reason = str(getattr(exc, "reason", exc))
+        if "SSL" not in reason.upper() and "CERTIFICATE" not in reason.upper():
+            raise
+        logger.warning("Python TLS verify failed (%s). Retrying with the system certificate store.", reason)
+        completed = subprocess.run(
+            ["curl.exe", "-fsSL", "--max-time", "30", "-A", _HEADERS["User-Agent"], url],
+            check=True,
+            capture_output=True,
+        )
+        return completed.stdout
+
+
 def _read_html(url: str) -> list[pd.DataFrame]:
     """Drop-in for pd.read_html with a browser User-Agent."""
-    req  = urllib.request.Request(url, headers=_HEADERS)
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        html = resp.read()
+    html = _fetch_html(url)
     return pd.read_html(io.StringIO(html.decode("utf-8")))
 
 
@@ -47,7 +69,7 @@ def get_sp500() -> list[str]:
 
 def get_nasdaq100() -> list[str]:
     try:
-        tables = _read_html("https://en.wikipedia.org/wiki/Nasdaq-100")
+        tables = _read_html(_NASDAQ100_COMPANIES_URL)
         for t in tables:
             if "Ticker" in t.columns:
                 symbols = t["Ticker"].tolist()
@@ -62,14 +84,9 @@ def get_nasdaq100() -> list[str]:
 
 def get_dow30() -> list[str]:
     try:
-        tables = _read_html("https://en.wikipedia.org/wiki/Dow_Jones_Industrial_Average")
-        for t in tables:
-            if "Symbol" in t.columns:
-                symbols = t["Symbol"].tolist()
-                logger.info("Dow 30: %d symbols loaded.", len(symbols))
-                return symbols
-        logger.warning("Dow 30 table not found.")
-        return []
+        symbols = [symbol for symbol, _name in get_dow30_companies()]
+        logger.info("Dow 30: %d symbols loaded.", len(symbols))
+        return symbols
     except Exception as e:
         logger.error("Failed to fetch Dow 30: %s", e)
         return []
@@ -107,10 +124,12 @@ def get_sp500_sector_map() -> dict[str, str]:
 def get_nasdaq100_sector_map() -> dict[str, str]:
     """GICS sectors for NASDAQ-100 names (many are not in the S&P 500 table)."""
     try:
-        tables = _read_html("https://en.wikipedia.org/wiki/Nasdaq-100")
+        tables = _read_html(_NASDAQ100_COMPANIES_URL)
         for t in tables:
             if "Ticker" in t.columns:
-                col = next((c for c in t.columns if "Sector" in str(c)), None)
+                col = next((c for c in t.columns if "Industry" in str(c) and "Sub" not in str(c)), None)
+                if col is None:
+                    col = next((c for c in t.columns if "Sector" in str(c) and "Sub" not in str(c)), None)
                 if col is None:
                     return {}
                 df = t[["Ticker", col]].copy()
@@ -212,3 +231,276 @@ def select_symbols(
     if include_dow:
         mask |= table["dow30"].astype(bool)
     return sorted(table.loc[mask, "symbol"].tolist())
+
+
+# ── Company directory (name + ticker + index membership) ──────
+#
+# The trading universe above is symbols only. The company picker needs the
+# security name next to the ticker, with one row when a name sits in more
+# than one index.
+
+COMPANIES_FILE = "_companies.csv"
+_NASDAQ100_COMPANIES_URL = "https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies"
+_DOW_COMPONENTS_API = (
+    "https://en.wikipedia.org/w/api.php?action=parse"
+    "&page=Template:Dow_Jones_Industrial_Average_companies"
+    "&prop=wikitext&format=json"
+)
+_NAME_DROP = {
+    "incorporated", "inc", "corp", "corporation", "company", "companies",
+    "plc", "ltd", "co", "group", "holdings", "holding", "the", "class",
+}
+_DOW_NAME_ALIASES = {
+    "ibm": "international business machines",
+}
+_INDEX_LABELS = (
+    ("sp500", "S&P 500"),
+    ("nasdaq100", "NASDAQ-100"),
+    ("dow30", "Dow 30"),
+)
+
+
+def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    if isinstance(out.columns, pd.MultiIndex):
+        out.columns = [
+            " ".join(str(part) for part in col if str(part) not in {"", "nan"}).strip()
+            for col in out.columns
+        ]
+    out.columns = [str(c).strip() for c in out.columns]
+    return out
+
+
+def _find_col(df: pd.DataFrame, *names: str) -> Optional[str]:
+    lookup = {str(c).strip().lower(): c for c in df.columns}
+    for name in names:
+        hit = lookup.get(name.lower())
+        if hit is not None:
+            return hit
+    for name in names:
+        needle = name.lower()
+        for key, col in lookup.items():
+            if needle in key:
+                return col
+    return None
+
+
+def _clean_symbol(value) -> str:
+    text = str(value).strip().upper()
+    text = re.sub(r"\[.*?\]", "", text)
+    text = text.replace(".", "-")
+    text = re.sub(r"[^A-Z0-9\-]", "", text.split()[0] if text else "")
+    return text
+
+
+def _clean_name(value) -> str:
+    text = re.sub(r"\[.*?\]", "", str(value))
+    return " ".join(text.split())
+
+
+def _pairs_from_table(df: pd.DataFrame, symbol_names: tuple[str, ...], name_names: tuple[str, ...]) -> list[tuple[str, str]]:
+    df = _flatten_columns(df)
+    sym_col = _find_col(df, *symbol_names)
+    name_col = _find_col(df, *name_names)
+    if sym_col is None or name_col is None:
+        return []
+    pairs: list[tuple[str, str]] = []
+    for symbol, name in zip(df[sym_col], df[name_col]):
+        ticker = _clean_symbol(symbol)
+        company = _clean_name(name)
+        if not ticker or ticker == "NAN" or not company or company.lower() == "nan":
+            continue
+        pairs.append((ticker, company))
+    return pairs
+
+
+def get_sp500_companies() -> list[tuple[str, str]]:
+    try:
+        tables = _read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
+        pairs = _pairs_from_table(tables[0], ("Symbol", "Ticker"), ("Security", "Company", "Name"))
+        logger.info("S&P 500 companies: %d names loaded.", len(pairs))
+        return pairs
+    except Exception as e:
+        logger.error("Failed to fetch S&P 500 companies: %s", e)
+        return []
+
+
+def _closest(candidates: list[list[tuple[str, str]]], target: int) -> list[tuple[str, str]]:
+    return min(candidates, key=lambda pairs: (abs(len(pairs) - target), -len(pairs)))
+
+
+def get_nasdaq100_companies() -> list[tuple[str, str]]:
+    try:
+        tables = _read_html(_NASDAQ100_COMPANIES_URL)
+        candidates = []
+        for table in tables:
+            pairs = _pairs_from_table(table, ("Ticker", "Symbol"), ("Company", "Security", "Name"))
+            if 90 <= len(pairs) <= 110:
+                candidates.append(pairs)
+        if not candidates:
+            logger.warning("NASDAQ-100 company table not found.")
+            return []
+        pairs = _closest(candidates, 101)
+        logger.info("NASDAQ-100 companies: %d names loaded.", len(pairs))
+        return pairs
+    except Exception as e:
+        logger.error("Failed to fetch NASDAQ-100 companies: %s", e)
+        return []
+
+
+def _norm_name(name: str) -> str:
+    text = html.unescape(str(name))
+    text = re.sub(r"\s*\([^)]*\)", " ", text)
+    text = text.lower().replace("&", " and ").replace("'", "")
+    text = re.sub(r"[^a-z0-9 ]", " ", text)
+    parts = [part for part in text.split() if part not in _NAME_DROP]
+    return " ".join(parts)
+
+
+def _dow_component_labels() -> list[str]:
+    """Display names from the Dow components navbox. That page no longer has a ticker table."""
+    payload = json.loads(_fetch_html(_DOW_COMPONENTS_API).decode("utf-8"))
+    wikitext = payload["parse"]["wikitext"]["*"]
+    wikitext = re.sub(r"<noinclude>.*?</noinclude>", "", wikitext, flags=re.S)
+    labels = []
+    for match in re.finditer(r"\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]", wikitext):
+        title = html.unescape(match.group(1)).strip()
+        label = html.unescape((match.group(2) or title)).strip()
+        if not label or title.lower() == "dow jones industrial average":
+            continue
+        labels.append(label)
+    return labels
+
+
+def _prefer_match(candidates: list[tuple[str, str]], key: str) -> tuple[str, str]:
+    class_a = [item for item in candidates if "class a" in item[1].lower()]
+    if len(class_a) == 1:
+        return class_a[0]
+    return min(candidates, key=lambda item: (abs(len(_norm_name(item[1])) - len(key)), item[0]))
+
+
+def _match_dow_name(label: str, companies: list[tuple[str, str]]) -> Optional[tuple[str, str]]:
+    key = _DOW_NAME_ALIASES.get(_norm_name(label), _norm_name(label))
+    if not key:
+        return None
+    exact = []
+    partial = []
+    for symbol, name in companies:
+        other = _DOW_NAME_ALIASES.get(_norm_name(name), _norm_name(name))
+        if other == key:
+            exact.append((symbol, name))
+        elif len(key) >= 3 and (key in other or other in key):
+            partial.append((symbol, name))
+    pool = exact or partial
+    if not pool:
+        return None
+    if len(pool) == 1:
+        return pool[0]
+    logger.info("Dow name %s matched %s.", label, [item[0] for item in pool])
+    return _prefer_match(pool, key)
+
+
+def get_dow30_companies(
+    sp500: Optional[list[tuple[str, str]]] = None,
+) -> list[tuple[str, str]]:
+    """Dow names joined to S&P 500 tickers. Every current Dow component is also in the S&P 500."""
+    try:
+        labels = _dow_component_labels()
+        universe = sp500 if sp500 is not None else get_sp500_companies()
+        pairs: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for label in labels:
+            match = _match_dow_name(label, universe)
+            if match is None:
+                logger.warning("No S&P 500 ticker for Dow component %s.", label)
+                continue
+            if match[0] in seen:
+                continue
+            seen.add(match[0])
+            pairs.append(match)
+        logger.info("Dow 30 companies: %d names loaded.", len(pairs))
+        return pairs
+    except Exception as e:
+        logger.error("Failed to fetch Dow 30 companies: %s", e)
+        return []
+
+
+def _index_label(row: pd.Series) -> str:
+    labels = [label for flag, label in _INDEX_LABELS if bool(row[flag])]
+    return ", ".join(labels)
+
+
+def build_company_directory(
+    include_sp500:  bool = True,
+    include_nasdaq: bool = True,
+    include_dow:    bool = True,
+) -> pd.DataFrame:
+    """One row per company: ticker, name, and which of the three indexes it belongs to."""
+    rows: dict[str, dict] = {}
+
+    def add(pairs: list[tuple[str, str]], flag: str) -> None:
+        for symbol, name in pairs:
+            row = rows.setdefault(symbol, {
+                "symbol": symbol,
+                "name": name,
+                "sp500": False,
+                "nasdaq100": False,
+                "dow30": False,
+            })
+            if name and (not row["name"] or row["name"] == symbol):
+                row["name"] = name
+            row[flag] = True
+
+    sp500 = get_sp500_companies() if include_sp500 or include_dow else []
+    if include_sp500:
+        add(sp500, "sp500")
+    if include_nasdaq:
+        add(get_nasdaq100_companies(), "nasdaq100")
+    if include_dow:
+        add(get_dow30_companies(sp500), "dow30")
+
+    if not rows:
+        return pd.DataFrame(columns=["symbol", "name", "sp500", "nasdaq100", "dow30", "indexes", "fetched_at"])
+
+    table = pd.DataFrame(rows.values())
+    table["indexes"] = table.apply(_index_label, axis=1)
+    table["fetched_at"] = pd.Timestamp.now().floor("s")
+    return table.sort_values(["name", "symbol"]).reset_index(drop=True)
+
+
+def load_company_directory(
+    cache_dir:    str  = "./data/cache",
+    max_age_days: int  = 7,
+    refresh:      bool = False,
+) -> pd.DataFrame:
+    """
+    Cached company directory for the picker. Re-fetches Wikipedia when the file
+    is missing, older than `max_age_days`, or `refresh=True`. Uses the stale
+    file if the fetch fails.
+    """
+    path = os.path.join(cache_dir, COMPANIES_FILE)
+    cached = None
+    if os.path.exists(path):
+        cached = pd.read_csv(path, parse_dates=["fetched_at"])
+        for col in ("sp500", "nasdaq100", "dow30"):
+            if col in cached.columns:
+                cached[col] = cached[col].astype(bool)
+
+    fresh_enough = (
+        cached is not None and not cached.empty
+        and (pd.Timestamp.now() - cached["fetched_at"].max()).days <= max_age_days
+    )
+    if fresh_enough and not refresh:
+        return cached
+
+    table = build_company_directory()
+    if table.empty:
+        if cached is not None:
+            logger.warning("Company directory fetch failed — using cached list from %s.",
+                           cached["fetched_at"].max().date())
+            return cached
+        return table
+
+    os.makedirs(cache_dir, exist_ok=True)
+    table.to_csv(path, index=False)
+    return table

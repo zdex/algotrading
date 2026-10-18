@@ -8,7 +8,7 @@ import streamlit as st
 
 from backtester import results_store
 from data.feed import DataFeed
-from data.universe import UNIVERSE_FILE
+from data.universe import COMPANIES_FILE, UNIVERSE_FILE
 
 ROOT = Path(__file__).resolve().parents[2]
 REAL_CACHE = ROOT / "data" / "cache"
@@ -56,6 +56,18 @@ def universe_table(cache_path: str) -> pd.DataFrame:
     if not os.path.exists(path):
         return pd.DataFrame()
     return pd.read_csv(path, parse_dates=["fetched_at"])
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def company_directory(cache_path: str) -> pd.DataFrame:
+    path = os.path.join(cache_path, COMPANIES_FILE)
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    table = pd.read_csv(path, parse_dates=["fetched_at"])
+    for col in ("sp500", "nasdaq100", "dow30"):
+        if col in table.columns:
+            table[col] = table[col].astype(bool)
+    return table
 
 
 @st.cache_data(show_spinner=False)

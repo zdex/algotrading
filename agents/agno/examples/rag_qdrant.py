@@ -85,6 +85,13 @@ def index_texts(texts: List[str], metadatas: Optional[List[Dict[str, Any]]] = No
         return {"status": "fallback_indexed", "count": len(texts)}
 
 
+def _context_char_limit(provider: Optional[str]) -> int:
+    # Local models choke on huge PDF dumps; keep prompts smaller for Ollama.
+    if (provider or "").strip().lower() == "ollama":
+        return int(os.getenv("OLLAMA_CONTEXT_CHARS", "8000"))
+    return int(os.getenv("LLM_CONTEXT_CHARS", "24000"))
+
+
 def _generate_answer(prompt: str, provider: Optional[str] = None, model: Optional[str] = None) -> str:
     """Generate a final answer with the selected OpenAI, Gemini, or Ollama model."""
     if provider and model:
@@ -92,7 +99,13 @@ def _generate_answer(prompt: str, provider: Optional[str] = None, model: Optiona
     else:
         fallback = os.getenv("LLM_CHOICE") or f"openai:{os.getenv('OPENAI_MODEL', 'gpt-4o-mini')}"
         choice = parse_choice_id(fallback)
-    return generate_llm(prompt, provider=choice.provider, model=choice.model)
+    max_tokens = 512 if choice.provider == "ollama" else 1024
+    return generate_llm(
+        prompt,
+        provider=choice.provider,
+        model=choice.model,
+        max_tokens=max_tokens,
+    )
 
 
 def query(q: str, top_k: int = 3, provider: Optional[str] = None, model: Optional[str] = None) -> Dict[str, Any]:
@@ -125,6 +138,9 @@ def query(q: str, top_k: int = 3, provider: Optional[str] = None, model: Optiona
             docs.append({"id": p["id"], "score": float(sims[int(idx)]), **p["payload"]})
 
     ctx = "\n\n".join([d.get("text", "") for d in docs])
+    limit = _context_char_limit(provider)
+    if len(ctx) > limit:
+        ctx = ctx[:limit] + "\n\n[Context truncated for model speed.]"
     prompt = (
         "You are an assistant. Use the context to answer the question.\n"
         f"Context:\n{ctx}\n---\nQuestion: {q}\nAnswer:"

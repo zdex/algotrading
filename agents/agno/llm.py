@@ -99,6 +99,14 @@ def parse_choice_id(choice_id: str | None) -> LLMChoice:
     return LLMChoice("openai", DEFAULT_OPENAI_MODELS[0])
 
 
+def ollama_timeout_seconds() -> float:
+    raw = (os.getenv("OLLAMA_TIMEOUT") or "600").strip()
+    try:
+        return max(30.0, float(raw))
+    except ValueError:
+        return 600.0
+
+
 def missing_credentials_message(provider: str) -> str:
     if provider == "openai":
         return "No valid OPENAI_API_KEY found. Add it to the project `.env` and restart Streamlit."
@@ -185,6 +193,9 @@ def _generate_gemini(prompt: str, model: str, max_tokens: int) -> str:
 
 
 def _generate_ollama(prompt: str, model: str, max_tokens: int) -> str:
+    timeout = ollama_timeout_seconds()
+    # Keep local replies shorter so CPU inference finishes in a reasonable time.
+    predict = min(max_tokens, 512)
     try:
         resp = requests.post(
             f"{ollama_host()}/api/chat",
@@ -192,9 +203,15 @@ def _generate_ollama(prompt: str, model: str, max_tokens: int) -> str:
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "stream": False,
-                "options": {"temperature": 0.0, "num_predict": max_tokens},
+                "options": {"temperature": 0.0, "num_predict": predict},
             },
-            timeout=120,
+            timeout=timeout,
+        )
+    except requests.Timeout:
+        return (
+            f"LLM error: Ollama timed out after {int(timeout)}s while running `{model}`. "
+            "The model may still be loading, or CPU inference is slow for a large prompt. "
+            "Retry once, use a smaller model, or set OLLAMA_TIMEOUT in `.env`."
         )
     except requests.RequestException as e:
         return f"{missing_credentials_message('ollama')} ({e})"

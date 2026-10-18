@@ -30,6 +30,7 @@ pages = {
         st.Page(views / "portfolio.py", title="Portfolio", icon=":material/account_balance_wallet:"),
     ],
     "Research": [
+        st.Page(views / "companies.py", title="Companies", icon=":material/business:"),
         st.Page(views / "analysis.py", title="Analysis", icon=":material/insights:"),
         st.Page(views / "backtest_lab.py", title="Backtest Lab", icon=":material/science:"),
         st.Page(views / "results.py", title="Backtest Results", icon=":material/query_stats:"),

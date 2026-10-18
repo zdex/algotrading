@@ -17,7 +17,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from agents.agno.examples import rag_qdrant
-from agents.agno.workflow import run_agent_workflow
 from agents.agno.portfolio_agent import PortfolioAgent
 from agents.agno.analysis_agents import AnalystPipeline
 from core.portfolio import Portfolio
@@ -173,17 +172,11 @@ if st.button("Ask the agent") and query:
             (retrieval.get("docs", []) and "\n\n".join(d.get("text", "") for d in retrieval.get("docs", [])))
             + "\n\n" + portfolio_context
         )
-        workflow = run_agent_workflow(query, context_text)
         analysis = AnalystPipeline().analyze(context_text)
 
     if retrieval.get("error"):
         st.error(retrieval["error"])
     else:
-        st.subheader("Retrieved context")
-        for doc in retrieval.get("docs", []):
-            st.write(f"- {doc.get('source', '(unknown)')} (score={doc.get('score', 0):.3f})")
-            st.write(doc.get("text", "")[:1200])
-
         st.subheader("Portfolio context")
         st.write(portfolio_context)
 
@@ -196,9 +189,6 @@ if st.button("Ask the agent") and query:
             st.write("Key points:")
             for point in module.get("key_points", []):
                 st.write(f"- {point}")
-
-        st.subheader("Agent workflow")
-        st.json(workflow)
 
         if retrieval.get("answer"):
             provider = st.session_state.get("llm_provider", "openai")
