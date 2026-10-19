@@ -8,7 +8,9 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from data.feed import DataFeed
 from execution.portfolio_service import PortfolioBackend
+from planning.backtest import BENCHMARK, SLEEVE_PROXIES, proxy_symbols, run_plan_backtest
 from planning.model import (
     EQUITY_BUCKETS,
     HORIZONS,
@@ -22,6 +24,8 @@ from planning.model import (
     slice_errors,
 )
 from planning.store import PlanStore
+from ui.components import charts
+from ui.components import state
 from ui.components import theme as t
 from ui.components import widgets
 
@@ -710,3 +714,97 @@ if sector_hot:
 
 st.caption(f"Equity sleeves counted in the sector mix: {', '.join(sorted(EQUITY_BUCKETS))}.")
 st.caption(f"File: data/plans/{plan.id}.json · updated {plan.updated_at or 'not saved'}")
+
+st.subheader("Backtest")
+st.caption(
+    "Each sleeve is one ETF: "
+    + ", ".join(f"{name} {symbol}" for name, symbol in SLEEVE_PROXIES.items() if symbol)
+    + ". Cash earns nothing. "
+    "On the first session of a month, the contribution goes to sleeves below target. "
+    "At month-end the mix is reset to target when a sleeve is outside its band or its floor and ceiling. "
+    "Sector targets are not separate trades."
+)
+bt1, bt2, bt3, bt4 = st.columns(4)
+bt_start = bt1.date_input("Start", value=date(2019, 1, 1), key="plan_bt_start")
+bt_end = bt2.date_input("End", value=date.today(), key="plan_bt_end")
+bt_cash = bt3.number_input("Starting cash", min_value=1.0, value=100_000.0, step=10_000.0, format="%.0f", key="plan_bt_cash")
+bt_contribution = bt4.number_input(
+    "Monthly contribution",
+    min_value=0.0,
+    value=float(draft.monthly_contribution),
+    step=100.0,
+    format="%.0f",
+    key="plan_bt_contribution",
+)
+if st.button("Backtest this plan", type="primary", icon=":material/play_arrow:"):
+    if bt_start >= bt_end:
+        st.error("Start must be before end.")
+    else:
+        symbols = proxy_symbols(draft)
+        end_exclusive = (pd.Timestamp(bt_end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+        with st.spinner("Loading sleeve prices and running the backtest…"):
+            try:
+                feed = DataFeed(state.cache_dir())
+                feed.download(symbols, start=str(bt_start), end=end_exclusive)
+                prices = feed.load_prices(symbols, start=str(bt_start), end=end_exclusive)
+                result = run_plan_backtest(
+                    draft,
+                    prices,
+                    initial_cash=float(bt_cash),
+                    monthly_contribution=float(bt_contribution),
+                )
+            except Exception as exc:
+                result = None
+                st.error(str(exc))
+        if result is not None:
+            st.session_state["plan_backtest"] = result
+            st.session_state["plan_backtest_id"] = draft.id
+
+result = st.session_state.get("plan_backtest")
+if result is not None and st.session_state.get("plan_backtest_id") == draft.id:
+    metrics = result.metrics
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Final value", t.money(metrics.get("final_equity")), border=True)
+    m2.metric("Total return", "—" if metrics.get("total_return_pct") is None else f"{metrics['total_return_pct']:.1f}%", border=True)
+    m3.metric("CAGR", "—" if metrics.get("cagr_pct") is None else f"{metrics['cagr_pct']:.1f}%", border=True)
+    m4.metric("Max drawdown", "—" if metrics.get("max_drawdown_pct") is None else f"{metrics['max_drawdown_pct']:.1f}%", border=True)
+    n1, n2, n3, n4 = st.columns(4)
+    n1.metric("Sharpe", "—" if metrics.get("sharpe") is None else f"{metrics['sharpe']:.2f}", border=True)
+    n2.metric("Rebalances", metrics.get("rebalances", 0), border=True)
+    n3.metric("Contributed", t.money(result.contributed), border=True)
+    bench = metrics.get("benchmark_return_pct")
+    n4.metric(f"{BENCHMARK} return", "—" if bench is None else f"{bench:.1f}%", border=True)
+    for note in result.notes:
+        st.caption(note)
+    bench_frame = pd.DataFrame({BENCHMARK: result.benchmark}) if not result.benchmark.empty else None
+    st.plotly_chart(
+        charts.equity_vs_benchmarks(result.equity, bench_frame, "Plan value vs SPY"),
+        width="stretch",
+        key="plan-bt-equity",
+    )
+    weight_fig = go.Figure()
+    for i, column in enumerate(result.weights.columns):
+        weight_fig.add_trace(go.Scatter(
+            x=result.weights.index,
+            y=result.weights[column] * 100,
+            name=column,
+            mode="lines",
+            stackgroup="one",
+            line=dict(width=0.4, color=t.SERIES[i % len(t.SERIES)]),
+            hovertemplate="%{y:.1f}%",
+        ))
+    weight_fig.update_layout(
+        title="Sleeve weights",
+        height=320,
+        yaxis_ticksuffix="%",
+        yaxis_range=[0, 100],
+        hovermode="x unified",
+        margin=dict(l=8, r=8, t=44, b=8),
+    )
+    st.plotly_chart(weight_fig, width="stretch", key="plan-bt-weights")
+    if result.rebalance_dates:
+        shown = ", ".join(day.strftime("%Y-%m-%d") for day in result.rebalance_dates[:12])
+        extra = len(result.rebalance_dates) - 12
+        st.caption("Month-end rebalances: " + shown + (f" and {extra} more." if extra > 0 else "."))
+    else:
+        st.caption("No month-end rebalance. Sleeves stayed inside the band.")
