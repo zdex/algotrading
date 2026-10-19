@@ -10,8 +10,9 @@ from ui.components import state
 st.title("Companies")
 st.caption(
     "S&P 500, NASDAQ-100, and Dow 30. Select up to "
-    f"{MAX_COMPANIES} companies and submit them. The analysis agent collects SEC filings, "
-    "recent news, and X posts, then the selected model scores each name long, short, or flat."
+    f"{MAX_COMPANIES} companies and submit them. Filings, news, price action, and social "
+    "run together. The price-action agent marks trend and levels, then the selected "
+    "model scores each name long, short, or flat."
 )
 
 INDEX_FILTERS = {
@@ -112,7 +113,10 @@ checked = set(edited.loc[edited["select"].astype(bool), "symbol"])
 selected = (selected - visible) | checked
 st.session_state.selected_company_symbols = sorted(selected)
 
-st.caption(f"{len(selected)} selected · {len(view)} shown")
+st.caption(
+    f"{len(selected)} selected · {len(view)} shown"
+    + (f" · {', '.join(sorted(selected))}" if selected else "")
+)
 
 action_col, cache_col, clear_col = st.columns([1.2, 1.4, 3])
 use_cache = cache_col.checkbox("Use cached research", value=True)
@@ -133,32 +137,35 @@ if selected:
             column_config={"name": "Company", "symbol": "Ticker", "indexes": "Index"},
         )
 
-if run:
-    if not selected:
-        st.warning("Select at least one company.")
-    elif len(selected) > MAX_COMPANIES:
-        st.warning(f"Select at most {MAX_COMPANIES} companies for one research run.")
-    else:
-        picked = directory[directory["symbol"].isin(selected)].sort_values("name")
-        payload = [
-            {"symbol": row.symbol, "name": row.name, "indexes": row.indexes}
-            for row in picked.itertuples(index=False)
-        ]
-        status = st.empty()
-
-        def _progress(index: int, total: int, symbol: str) -> None:
-            status.caption(f"Researching and scoring {symbol} ({index} of {total})")
-
-        with st.spinner("Collecting evidence and scoring signals…"):
-            report = CompanyAnalysisAgent().analyze(
-                payload,
-                use_cache=use_cache,
-                provider=st.session_state.get("llm_provider"),
-                model=st.session_state.get("llm_model"),
-                progress=_progress,
-            )
-        status.empty()
-        st.session_state.company_analysis = report.to_dict()
+def _render_analysis(report: dict) -> None:
+    st.subheader("Analysis")
+    icon = ":material/check_circle:" if report.get("llm_called") else ":material/pending:"
+    st.info(report["note"], icon=icon)
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Companies", report["company_count"], border=True)
+    m2.metric("Status", report["status"], border=True)
+    m3.metric("LLM called", "No" if not report["llm_called"] else "Yes", border=True)
+    signals = pd.DataFrame(report["signals"])
+    if not signals.empty:
+        signals["indexes"] = signals["indexes"].apply(
+            lambda value: ", ".join(value) if isinstance(value, list) else value
+        )
+        st.dataframe(
+            signals[["name", "symbol", "indexes", "signal", "confidence", "status", "rationale"]],
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "name": "Company",
+                "symbol": "Ticker",
+                "indexes": "Index",
+                "signal": "Signal",
+                "confidence": st.column_config.NumberColumn("Confidence", format="%.2f"),
+                "status": "Status",
+                "rationale": "Rationale",
+            },
+        )
+    ready = [company for company in (report.get("evidence") or []) if company.get("fetched_at")]
+    _render_evidence(ready)
 
 
 def _render_evidence(evidence: list[dict]) -> None:
@@ -169,9 +176,10 @@ def _render_evidence(evidence: list[dict]) -> None:
         label = f"{company.get('name', '')} ({company.get('symbol', '')})"
         if company.get("cached"):
             label += " · cached"
-        with st.expander(label, expanded=len(evidence) == 1):
+        with st.expander(label, expanded=True):
             for error in company.get("errors") or []:
                 st.warning(error)
+            _render_price_action(company.get("price_action"))
             st.markdown("**Filings**")
             _records(
                 company.get("filings") or [],
@@ -199,6 +207,45 @@ def _render_evidence(evidence: list[dict]) -> None:
             )
 
 
+def _render_price_action(summary: dict | None) -> None:
+    st.markdown("**Price action**")
+    if not summary:
+        st.caption("No bar analysis.")
+        return
+    if summary.get("error"):
+        st.caption(summary["error"])
+        return
+    facts = pd.DataFrame([{
+        "timeframe": summary.get("timeframe"),
+        "bars": summary.get("bars"),
+        "last_date": summary.get("last_date"),
+        "last_close": summary.get("last_close"),
+        "trend": summary.get("trend"),
+        "support": summary.get("support"),
+        "resistance": summary.get("resistance"),
+        "breakout": summary.get("breakout"),
+        "gap_pct": summary.get("gap_pct"),
+        "volume_vs_average": summary.get("volume_vs_average"),
+    }])
+    st.dataframe(
+        facts,
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "timeframe": "Timeframe",
+            "bars": "Bars",
+            "last_date": "Last bar",
+            "last_close": st.column_config.NumberColumn("Close", format="%.2f"),
+            "trend": "Trend",
+            "support": st.column_config.NumberColumn("Support", format="%.2f"),
+            "resistance": st.column_config.NumberColumn("Resistance", format="%.2f"),
+            "breakout": "Breakout",
+            "gap_pct": st.column_config.NumberColumn("Gap %", format="%.2f"),
+            "volume_vs_average": st.column_config.NumberColumn("Volume x avg", format="%.2f"),
+        },
+    )
+
+
 def _records(rows: list[dict], columns: list[str], labels: dict[str, str]) -> None:
     if not rows:
         st.caption("Nothing collected.")
@@ -216,33 +263,40 @@ def _records(rows: list[dict], columns: list[str], labels: dict[str, str]) -> No
     st.dataframe(frame[keep], hide_index=True, width="stretch", column_config=config)
 
 
-report = st.session_state.get("company_analysis")
-if report:
-    st.subheader("Analysis")
-    icon = ":material/check_circle:" if report.get("llm_called") else ":material/pending:"
-    st.info(report["note"], icon=icon)
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Companies", report["company_count"], border=True)
-    m2.metric("Status", report["status"], border=True)
-    m3.metric("LLM called", "No" if not report["llm_called"] else "Yes", border=True)
-    signals = pd.DataFrame(report["signals"])
-    if not signals.empty:
-        signals["indexes"] = signals["indexes"].apply(
-            lambda value: ", ".join(value) if isinstance(value, list) else value
-        )
-        st.dataframe(
-            signals[["name", "symbol", "indexes", "signal", "confidence", "status", "rationale"]],
-            hide_index=True,
-            width="stretch",
-            column_config={
-                "name": "Company",
-                "symbol": "Ticker",
-                "indexes": "Index",
-                "signal": "Signal",
-                "confidence": st.column_config.NumberColumn("Confidence", format="%.2f"),
-                "status": "Status",
-                "rationale": "Rationale",
-            },
-        )
+if run:
+    if not selected:
+        st.warning("Select at least one company.")
+    elif len(selected) > MAX_COMPANIES:
+        st.warning(f"Select at most {MAX_COMPANIES} companies for one research run.")
+    else:
+        picked = directory[directory["symbol"].isin(selected)].sort_values("name")
+        payload = [
+            {"symbol": row.symbol, "name": row.name, "indexes": row.indexes}
+            for row in picked.itertuples(index=False)
+        ]
+        status = st.empty()
+        live = st.empty()
+        names = ", ".join(item["symbol"] for item in payload)
+        status.caption(f"Queued {len(payload)} companies: {names}")
 
-    _render_evidence(report.get("evidence") or [])
+        def _progress(index: int, total: int, symbol: str) -> None:
+            status.caption(f"Researching and scoring {symbol} ({index} of {total}): {names}")
+
+        def _on_update(report) -> None:
+            data = report.to_dict()
+            st.session_state.company_analysis = data
+            with live.container():
+                _render_analysis(data)
+
+        with st.spinner("Collecting evidence and scoring signals…"):
+            CompanyAnalysisAgent().analyze(
+                payload,
+                use_cache=use_cache,
+                provider=st.session_state.get("llm_provider"),
+                model=st.session_state.get("llm_model"),
+                progress=_progress,
+                on_update=_on_update,
+            )
+        status.empty()
+elif st.session_state.get("company_analysis"):
+    _render_analysis(st.session_state.company_analysis)

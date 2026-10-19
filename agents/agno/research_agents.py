@@ -2,6 +2,7 @@
 
 FilingsAgent reads SEC EDGAR for yearly and quarterly reports.
 NewsAgent reads a public news RSS search.
+PriceActionAgent downloads OHLCV bars and computes price structure.
 SocialAgent reads recent X posts when X_BEARER_TOKEN is set, then scores
 sentiment with the existing keyword scanner. None of these agents call an LLM.
 """
@@ -21,6 +22,7 @@ from urllib.parse import urlencode
 from agents.agno.analysis_agents import SentimentAnalysis
 from agents.agno.config import ROOT, env_secret
 from agents.agno.http_util import get_bytes
+from agents.agno.price_action import PriceActionAgent, PriceActionSummary, SwingPoint
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +100,7 @@ class CompanyEvidence:
     filings: list[FilingRecord] = field(default_factory=list)
     news: list[NewsItem] = field(default_factory=list)
     social: list[SocialPost] = field(default_factory=list)
+    price_action: PriceActionSummary | None = None
     errors: list[str] = field(default_factory=list)
     fetched_at: str = ""
     cached: bool = False
@@ -107,6 +110,7 @@ class CompanyEvidence:
         payload["filings"] = [item.to_dict() for item in self.filings]
         payload["news"] = [item.to_dict() for item in self.news]
         payload["social"] = [item.to_dict() for item in self.social]
+        payload["price_action"] = self.price_action.to_dict() if self.price_action else None
         return payload
 
 
@@ -127,6 +131,8 @@ def load_cached_evidence(symbol: str, name: str, max_age_hours: int = CACHE_HOUR
     if datetime.now() - fetched > timedelta(hours=max_age_hours):
         return None
     evidence = _evidence_from_dict(raw, name)
+    if evidence.price_action is None:
+        return None
     evidence.cached = True
     return evidence
 
@@ -146,6 +152,7 @@ def _evidence_from_dict(raw: dict[str, Any], name: str) -> CompanyEvidence:
         filings=[FilingRecord(**item) for item in raw.get("filings", [])],
         news=[NewsItem(**item) for item in raw.get("news", [])],
         social=[SocialPost(**item) for item in raw.get("social", [])],
+        price_action=_price_action_from_dict(raw.get("price_action")),
         errors=list(raw.get("errors", [])),
         fetched_at=str(raw.get("fetched_at", "")),
         cached=False,
@@ -219,8 +226,21 @@ class SocialAgent:
             return [], f"Social lookup failed for {symbol}: {exc}"
 
 
+def _price_action_from_dict(raw: dict[str, Any] | None) -> PriceActionSummary | None:
+    if not raw:
+        return None
+    highs = [SwingPoint(**point) for point in raw.get("swing_highs") or []]
+    lows = [SwingPoint(**point) for point in raw.get("swing_lows") or []]
+    fields = {
+        key: value
+        for key, value in raw.items()
+        if key not in {"swing_highs", "swing_lows"}
+    }
+    return PriceActionSummary(**fields, swing_highs=highs, swing_lows=lows)
+
+
 def collect_evidence(symbol: str, name: str, use_cache: bool = True) -> CompanyEvidence:
-    """Run the three research agents for one company. A fresh cache short-circuits the calls."""
+    """Run filings, news, price action, and social agents together."""
     if use_cache:
         cached = load_cached_evidence(symbol, name)
         if cached is not None:
@@ -230,13 +250,16 @@ def collect_evidence(symbol: str, name: str, use_cache: bool = True) -> CompanyE
 
     filings_agent = FilingsAgent()
     news_agent = NewsAgent()
+    price_agent = PriceActionAgent()
     social_agent = SocialAgent()
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         filings_future = pool.submit(filings_agent.collect, symbol, name)
         news_future = pool.submit(news_agent.collect, symbol, name)
+        price_future = pool.submit(price_agent.collect, symbol, name)
         social_future = pool.submit(social_agent.collect, symbol, name)
         filings, filings_error = filings_future.result()
         news, news_error = news_future.result()
+        price_action, price_error = price_future.result()
         social, social_error = social_future.result()
 
     evidence = CompanyEvidence(
@@ -245,7 +268,8 @@ def collect_evidence(symbol: str, name: str, use_cache: bool = True) -> CompanyE
         filings=filings,
         news=news,
         social=social,
-        errors=[error for error in (filings_error, news_error, social_error) if error],
+        price_action=price_action,
+        errors=[error for error in (filings_error, news_error, price_error, social_error) if error],
         fetched_at=datetime.now().replace(microsecond=0).isoformat(),
         cached=False,
     )
@@ -256,6 +280,10 @@ def collect_evidence(symbol: str, name: str, use_cache: bool = True) -> CompanyE
 def evidence_brief(evidence: CompanyEvidence) -> str:
     """Compact text the signal model can read: filing excerpts, headlines, and posts."""
     lines = [f"Company: {evidence.name} ({evidence.symbol})"]
+    if evidence.price_action is not None:
+        lines.append(evidence.price_action.brief())
+    else:
+        lines.append("Price action: none")
     yearly = next((row for row in evidence.filings if row.form in {"10-K", "20-F"}), None)
     quarterly = next((row for row in evidence.filings if row.form in {"10-Q", "6-K"}), None)
     lines.append("Filings:")
