@@ -8,7 +8,7 @@ import streamlit as st
 
 from backtester import results_store
 from data.feed import DataFeed
-from data.universe import COMPANIES_FILE, UNIVERSE_FILE
+from data.universe import COMPANIES_FILE, QUOTES_FILE, UNIVERSE_FILE
 
 ROOT = Path(__file__).resolve().parents[2]
 REAL_CACHE = ROOT / "data" / "cache"
@@ -71,6 +71,13 @@ def company_directory(cache_path: str) -> pd.DataFrame:
         table["sector"] = "Unknown"
     else:
         table["sector"] = table["sector"].fillna("Unknown").astype(str).replace({"": "Unknown"})
+    quotes_path = os.path.join(cache_path, QUOTES_FILE)
+    if os.path.exists(quotes_path):
+        quotes = pd.read_csv(quotes_path, parse_dates=["quoted_at"])
+        overlap = [column for column in quotes.columns if column != "symbol" and column in table.columns]
+        if overlap:
+            table = table.drop(columns=overlap)
+        table = table.merge(quotes, on="symbol", how="left")
     return table
 
 

@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from agents.agno.company_analysis_agent import MAX_COMPANIES, CompanyAnalysisAgent
-from data.universe import load_company_directory
+from data.universe import DETAIL_COLUMNS, load_company_directory, load_company_quotes
 from ui.components import state
 
 st.title("Companies")
@@ -20,6 +20,20 @@ INDEX_FILTERS = {
     "NASDAQ-100": "nasdaq100",
     "Dow 30": "dow30",
 }
+TABLE_COLUMNS = [
+    "symbol",
+    "name",
+    "sector",
+    "market_cap",
+    "price",
+    "trailing_pe",
+    "dividend_yield",
+    "sub_industry",
+    "headquarters",
+    "founded",
+    "indexes",
+]
+LOCKED_COLUMNS = TABLE_COLUMNS.copy()
 
 
 def _load(refresh: bool = False) -> pd.DataFrame:
@@ -49,11 +63,31 @@ if "sector" not in directory.columns:
     directory = directory.copy()
     directory["sector"] = "Unknown"
 
-if directory["sector"].fillna("Unknown").eq("Unknown").all():
-    with st.spinner("Loading sectors…"):
+needs_profile = (
+    directory["sector"].fillna("Unknown").eq("Unknown").all()
+    or any(column not in directory.columns for column in DETAIL_COLUMNS)
+)
+if needs_profile and not st.session_state.get("company_profile_failed"):
+    with st.spinner("Loading sectors and company details…"):
         directory = _load(refresh=False)
-    if not directory.empty and not directory["sector"].fillna("Unknown").eq("Unknown").all():
+    profile_ready = (
+        not directory.empty
+        and not directory["sector"].fillna("Unknown").eq("Unknown").all()
+        and all(column in directory.columns for column in DETAIL_COLUMNS)
+    )
+    if profile_ready:
         st.rerun()
+    st.session_state.company_profile_failed = True
+
+quotes_missing = "quoted_at" not in directory.columns or directory["quoted_at"].isna().all()
+if quotes_missing and not st.session_state.get("company_quotes_failed"):
+    with st.spinner("Loading market caps…"):
+        quotes = load_company_quotes(state.cache_dir(), directory["symbol"].tolist())
+    priced = not quotes.empty and quotes["market_cap"].notna().any()
+    state.company_directory.clear()
+    if priced:
+        st.rerun()
+    st.session_state.company_quotes_failed = True
 
 snap = pd.Timestamp(directory["fetched_at"].max()).date()
 c1, c2, c3, c4 = st.columns(4)
@@ -61,7 +95,12 @@ c1.metric("Companies", len(directory), border=True)
 c2.metric("S&P 500", int(directory["sp500"].sum()), border=True)
 c3.metric("NASDAQ-100", int(directory["nasdaq100"].sum()), border=True)
 c4.metric("Dow 30", int(directory["dow30"].sum()), border=True)
-st.caption(f"Wikipedia snapshot {snap}. A company in more than one index is listed once.")
+st.caption(
+    f"Wikipedia snapshot {snap}. A company in more than one index is listed once. "
+    "Market cap, price, P/E, and yield refresh about every 12 hours."
+)
+if st.session_state.get("company_quotes_failed"):
+    st.warning("Market caps could not be loaded. Use Refresh list to try again.")
 
 filters, sector_col, search_col, refresh_col = st.columns([1.3, 1.6, 1.5, 1])
 chosen = filters.multiselect(
@@ -82,8 +121,13 @@ chosen_sectors = sector_col.multiselect(
 query = search_col.text_input("Search name or ticker", placeholder="Apple or AAPL")
 if refresh_col.button("Refresh list", icon=":material/refresh:", width="stretch"):
     previous = pd.Timestamp(directory["fetched_at"].max())
-    with st.spinner("Refreshing constituents…"):
+    with st.spinner("Refreshing constituents and market caps…"):
         refreshed = _load(refresh=True)
+        if not refreshed.empty:
+            load_company_quotes(state.cache_dir(), refreshed["symbol"].tolist(), refresh=True)
+            state.company_directory.clear()
+    st.session_state.pop("company_profile_failed", None)
+    st.session_state.pop("company_quotes_failed", None)
     if refreshed.empty or pd.Timestamp(refreshed["fetched_at"].max()) == previous:
         st.error("Refresh failed. Showing the saved list.")
     else:
@@ -111,7 +155,10 @@ if query.strip():
 view = view.sort_values(["sector", "name", "symbol"]).reset_index(drop=True)
 selected = set(st.session_state.selected_company_symbols)
 
-editor = view[["symbol", "name", "sector", "indexes"]].copy()
+for column in TABLE_COLUMNS:
+    if column not in view.columns:
+        view[column] = pd.NA
+editor = view[TABLE_COLUMNS].copy()
 editor.insert(0, "select", editor["symbol"].isin(selected))
 
 edited = st.data_editor(
@@ -121,12 +168,19 @@ edited = st.data_editor(
     height=480,
     num_rows="fixed",
     key=f"company_editor_{st.session_state.company_editor_nonce}_{hash(tuple(editor['symbol']))}",
-    disabled=["symbol", "name", "sector", "indexes"],
+    disabled=LOCKED_COLUMNS,
     column_config={
         "select": st.column_config.CheckboxColumn("Select", default=False),
         "name": "Company",
         "symbol": "Ticker",
         "sector": "Sector",
+        "market_cap": st.column_config.NumberColumn("Market cap", format="compact"),
+        "price": st.column_config.NumberColumn("Price", format="$%.2f"),
+        "trailing_pe": st.column_config.NumberColumn("P/E", format="%.1f"),
+        "dividend_yield": st.column_config.NumberColumn("Yield %", format="%.2f"),
+        "sub_industry": "Sub-industry",
+        "headquarters": "Headquarters",
+        "founded": "Founded",
         "indexes": "Index",
     },
 )
@@ -170,14 +224,22 @@ if clear_col.button("Clear selection"):
 if selected:
     picked = directory[directory["symbol"].isin(selected)].sort_values("name")
     with st.expander(f"Selected companies ({len(picked)})", expanded=False):
+        shown = [column for column in TABLE_COLUMNS if column in picked.columns]
         st.dataframe(
-            picked[["name", "symbol", "sector", "indexes"]],
+            picked[shown],
             hide_index=True,
             width="stretch",
             column_config={
                 "name": "Company",
                 "symbol": "Ticker",
                 "sector": "Sector",
+                "market_cap": st.column_config.NumberColumn("Market cap", format="compact"),
+                "price": st.column_config.NumberColumn("Price", format="$%.2f"),
+                "trailing_pe": st.column_config.NumberColumn("P/E", format="%.1f"),
+                "dividend_yield": st.column_config.NumberColumn("Yield %", format="%.2f"),
+                "sub_industry": "Sub-industry",
+                "headquarters": "Headquarters",
+                "founded": "Founded",
                 "indexes": "Index",
             },
         )

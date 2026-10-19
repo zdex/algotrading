@@ -1,0 +1,125 @@
+{
+  "id": "gaurav-plan",
+  "name": "gaurav plan",
+  "purpose": "Long-term growth",
+  "horizon": "7\u201315 years",
+  "status": "draft",
+  "currency": "USD",
+  "buckets": [
+    {
+      "name": "Local equity",
+      "target": 30.0,
+      "floor": 25,
+      "ceiling": 37
+    },
+    {
+      "name": "Developed global equity",
+      "target": 35.0,
+      "floor": 30,
+      "ceiling": 42
+    },
+    {
+      "name": "Emerging equity",
+      "target": 10.0,
+      "floor": 5,
+      "ceiling": 17
+    },
+    {
+      "name": "Fixed income",
+      "target": 10.0,
+      "floor": 5,
+      "ceiling": 17
+    },
+    {
+      "name": "Gold",
+      "target": 5.0,
+      "floor": 0.0,
+      "ceiling": 12
+    },
+    {
+      "name": "Cash",
+      "target": 10.0,
+      "floor": 5,
+      "ceiling": 17
+    }
+  ],
+  "sectors": [
+    {
+      "name": "Technology",
+      "target": 18.0,
+      "floor": 13,
+      "ceiling": 25
+    },
+    {
+      "name": "Financials",
+      "target": 14.0,
+      "floor": 9,
+      "ceiling": 21
+    },
+    {
+      "name": "Health Care",
+      "target": 12.0,
+      "floor": 7,
+      "ceiling": 19
+    },
+    {
+      "name": "Consumer Discretionary",
+      "target": 10.0,
+      "floor": 5,
+      "ceiling": 17
+    },
+    {
+      "name": "Industrials",
+      "target": 10.0,
+      "floor": 5,
+      "ceiling": 17
+    },
+    {
+      "name": "Communication Services",
+      "target": 8.0,
+      "floor": 3,
+      "ceiling": 15
+    },
+    {
+      "name": "Consumer Staples",
+      "target": 8.0,
+      "floor": 3,
+      "ceiling": 15
+    },
+    {
+      "name": "Energy",
+      "target": 6.0,
+      "floor": 1,
+      "ceiling": 13
+    },
+    {
+      "name": "Materials",
+      "target": 5.0,
+      "floor": 0.0,
+      "ceiling": 12
+    },
+    {
+      "name": "Utilities",
+      "target": 5.0,
+      "floor": 0.0,
+      "ceiling": 12
+    },
+    {
+      "name": "Real Estate",
+      "target": 4.0,
+      "floor": 0.0,
+      "ceiling": 11
+    }
+  ],
+  "rules": {
+    "max_single_name_pct": 8,
+    "max_sector_pct": 25,
+    "rebalance_band_pct": 5,
+    "review_date": "",
+    "monthly_contribution": 0,
+    "notes": ""
+  },
+  "classifications": {},
+  "created_at": "2026-10-19T18:51:12",
+  "updated_at": "2026-10-19T18:51:12"
+}

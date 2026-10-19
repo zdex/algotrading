@@ -240,6 +240,10 @@ def select_symbols(
 # than one index.
 
 COMPANIES_FILE = "_companies.csv"
+QUOTES_FILE = "_company_quotes.csv"
+DETAIL_COLUMNS = ("sub_industry", "headquarters", "founded")
+QUOTE_COLUMNS = ("market_cap", "price", "trailing_pe", "dividend_yield")
+_QUOTE_BATCH = 80
 _NASDAQ100_COMPANIES_URL = "https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies"
 _DOW_COMPONENTS_API = (
     "https://en.wikipedia.org/w/api.php?action=parse"
@@ -430,6 +434,148 @@ def _index_label(row: pd.Series) -> str:
     return ", ".join(labels)
 
 
+def _clean_cell(value) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    text = str(value).strip()
+    if text.lower() in {"", "nan", "none"}:
+        return ""
+    return text
+
+
+def _blank_facts() -> dict[str, str]:
+    return {column: "" for column in DETAIL_COLUMNS}
+
+
+def get_company_facts() -> dict[str, dict[str, str]]:
+    """Static profile fields from the Wikipedia constituent tables."""
+    facts: dict[str, dict[str, str]] = {}
+    try:
+        tables = _read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
+        for record in tables[0].to_dict("records"):
+            symbol = _clean_cell(record.get("Symbol")).replace(".", "-")
+            if not symbol:
+                continue
+            facts[symbol] = {
+                "sub_industry": _clean_cell(record.get("GICS Sub-Industry")),
+                "headquarters": _clean_cell(record.get("Headquarters Location")),
+                "founded": _clean_cell(record.get("Founded")),
+            }
+    except Exception as e:
+        logger.error("Failed to fetch S&P 500 company details: %s", e)
+
+    try:
+        tables = _read_html(_NASDAQ100_COMPANIES_URL)
+        for table in tables:
+            if "Ticker" not in table.columns:
+                continue
+            sub = next(
+                (column for column in table.columns if "Subsector" in str(column) or "Sub-Industry" in str(column)),
+                None,
+            )
+            if sub is None:
+                continue
+            for record in table.to_dict("records"):
+                symbol = _clean_cell(record.get("Ticker")).replace(".", "-")
+                if not symbol:
+                    continue
+                entry = facts.setdefault(symbol, _blank_facts())
+                if not entry["sub_industry"]:
+                    entry["sub_industry"] = _clean_cell(record.get(sub))
+            break
+    except Exception as e:
+        logger.error("Failed to fetch NASDAQ-100 company details: %s", e)
+    return facts
+
+
+def _apply_facts(table: pd.DataFrame, facts: dict[str, dict[str, str]]) -> pd.DataFrame:
+    out = table.copy()
+    for column in DETAIL_COLUMNS:
+        out[column] = out["symbol"].map(lambda symbol, column=column: (facts.get(symbol) or {}).get(column, ""))
+    return out
+
+
+def fetch_company_quotes(symbols: list[str]) -> pd.DataFrame:
+    """Market cap, price, trailing P/E, and dividend yield for a list of tickers."""
+    columns = ["symbol", *QUOTE_COLUMNS]
+    unique = list(dict.fromkeys(symbols))
+    if not unique:
+        frame = pd.DataFrame(columns=[*columns, "quoted_at"])
+        return frame
+    try:
+        from yfinance.const import _QUERY1_URL_
+        from yfinance.data import YfData
+    except Exception as e:
+        logger.error("yfinance is not available for company quotes: %s", e)
+        return pd.DataFrame(columns=[*columns, "quoted_at"])
+
+    client = YfData()
+    rows: list[dict] = []
+    for start in range(0, len(unique), _QUOTE_BATCH):
+        chunk = unique[start:start + _QUOTE_BATCH]
+        try:
+            raw = client.get_raw_json(
+                f"{_QUERY1_URL_}/v7/finance/quote?",
+                params={"symbols": ",".join(chunk), "formatted": "false"},
+            )
+        except Exception as exc:
+            logger.warning("Quote batch starting at %s failed: %s", chunk[0], exc)
+            continue
+        for item in (raw or {}).get("quoteResponse", {}).get("result") or []:
+            symbol = _clean_cell(item.get("symbol")).replace(".", "-")
+            if not symbol:
+                continue
+            rows.append({
+                "symbol": symbol,
+                "market_cap": item.get("marketCap"),
+                "price": item.get("regularMarketPrice"),
+                "trailing_pe": item.get("trailingPE"),
+                "dividend_yield": item.get("dividendYield"),
+            })
+    found = {row["symbol"]: row for row in rows}
+    stamp = pd.Timestamp.now().floor("s")
+    filled = []
+    for symbol in unique:
+        row = dict(found.get(symbol) or {"symbol": symbol, **{column: None for column in QUOTE_COLUMNS}})
+        row["quoted_at"] = stamp
+        filled.append(row)
+    return pd.DataFrame(filled)
+
+
+def load_company_quotes(
+    cache_dir: str,
+    symbols: list[str],
+    max_age_hours: int = 12,
+    refresh: bool = False,
+) -> pd.DataFrame:
+    """Cached Yahoo quotes. One row per requested symbol, refreshed together."""
+    path = os.path.join(cache_dir, QUOTES_FILE)
+    cached = None
+    if os.path.exists(path):
+        cached = pd.read_csv(path, parse_dates=["quoted_at"])
+
+    wanted = list(dict.fromkeys(symbols))
+    fresh = False
+    if cached is not None and not cached.empty and "quoted_at" in cached.columns and not refresh:
+        age = pd.Timestamp.now() - pd.Timestamp(cached["quoted_at"].max())
+        covered = set(wanted).issubset(set(cached["symbol"].astype(str)))
+        fresh = age <= pd.Timedelta(hours=max_age_hours) and covered
+    if fresh:
+        return cached
+
+    fetched = fetch_company_quotes(wanted)
+    priced = fetched["market_cap"].notna().any() if not fetched.empty and "market_cap" in fetched.columns else False
+    if fetched.empty or not priced:
+        if cached is not None:
+            logger.warning("Company quote fetch failed — using the saved quotes.")
+            return cached
+        return fetched
+
+    os.makedirs(cache_dir, exist_ok=True)
+    fetched.to_csv(path, index=False)
+    return fetched
+
+
 def build_company_directory(
     include_sp500:  bool = True,
     include_nasdaq: bool = True,
@@ -459,12 +605,14 @@ def build_company_directory(
     if include_dow:
         add(get_dow30_companies(sp500), "dow30")
 
+    detail_columns = ["symbol", "name", "sector", *DETAIL_COLUMNS, "sp500", "nasdaq100", "dow30", "indexes", "fetched_at"]
     if not rows:
-        return pd.DataFrame(columns=["symbol", "name", "sector", "sp500", "nasdaq100", "dow30", "indexes", "fetched_at"])
+        return pd.DataFrame(columns=detail_columns)
 
     table = pd.DataFrame(rows.values())
     sectors = get_sector_map()
     table["sector"] = table["symbol"].map(lambda symbol: sectors.get(symbol, "Unknown"))
+    table = _apply_facts(table, get_company_facts())
     table["indexes"] = table.apply(_index_label, axis=1)
     table["fetched_at"] = pd.Timestamp.now().floor("s")
     return table.sort_values(["sector", "name", "symbol"]).reset_index(drop=True)
@@ -498,14 +646,22 @@ def load_company_directory(
         or cached["sector"].fillna("").astype(str).str.strip().eq("").all()
         or cached["sector"].fillna("Unknown").eq("Unknown").all()
     )
-    if fresh_enough and needs_sector and not refresh:
-        sectors = get_sector_map()
-        if sectors:
-            cached = cached.copy()
-            cached["sector"] = cached["symbol"].map(lambda symbol: sectors.get(symbol, "Unknown"))
-            cached.to_csv(path, index=False)
-            return cached
+    needs_facts = cached is not None and any(column not in cached.columns for column in DETAIL_COLUMNS)
     if fresh_enough and not refresh:
+        changed = False
+        if needs_sector:
+            sectors = get_sector_map()
+            if sectors:
+                cached = cached.copy()
+                cached["sector"] = cached["symbol"].map(lambda symbol: sectors.get(symbol, "Unknown"))
+                changed = True
+        if needs_facts:
+            facts = get_company_facts()
+            if facts:
+                cached = _apply_facts(cached, facts)
+                changed = True
+        if changed:
+            cached.to_csv(path, index=False)
         return cached
 
     table = build_company_directory()
