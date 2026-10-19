@@ -460,12 +460,14 @@ def build_company_directory(
         add(get_dow30_companies(sp500), "dow30")
 
     if not rows:
-        return pd.DataFrame(columns=["symbol", "name", "sp500", "nasdaq100", "dow30", "indexes", "fetched_at"])
+        return pd.DataFrame(columns=["symbol", "name", "sector", "sp500", "nasdaq100", "dow30", "indexes", "fetched_at"])
 
     table = pd.DataFrame(rows.values())
+    sectors = get_sector_map()
+    table["sector"] = table["symbol"].map(lambda symbol: sectors.get(symbol, "Unknown"))
     table["indexes"] = table.apply(_index_label, axis=1)
     table["fetched_at"] = pd.Timestamp.now().floor("s")
-    return table.sort_values(["name", "symbol"]).reset_index(drop=True)
+    return table.sort_values(["sector", "name", "symbol"]).reset_index(drop=True)
 
 
 def load_company_directory(
@@ -490,6 +492,19 @@ def load_company_directory(
         cached is not None and not cached.empty
         and (pd.Timestamp.now() - cached["fetched_at"].max()).days <= max_age_days
     )
+    needs_sector = (
+        cached is None
+        or "sector" not in cached.columns
+        or cached["sector"].fillna("").astype(str).str.strip().eq("").all()
+        or cached["sector"].fillna("Unknown").eq("Unknown").all()
+    )
+    if fresh_enough and needs_sector and not refresh:
+        sectors = get_sector_map()
+        if sectors:
+            cached = cached.copy()
+            cached["sector"] = cached["symbol"].map(lambda symbol: sectors.get(symbol, "Unknown"))
+            cached.to_csv(path, index=False)
+            return cached
     if fresh_enough and not refresh:
         return cached
 

@@ -45,6 +45,16 @@ if directory.empty:
         st.stop()
     st.rerun()
 
+if "sector" not in directory.columns:
+    directory = directory.copy()
+    directory["sector"] = "Unknown"
+
+if directory["sector"].fillna("Unknown").eq("Unknown").all():
+    with st.spinner("Loading sectors…"):
+        directory = _load(refresh=False)
+    if not directory.empty and not directory["sector"].fillna("Unknown").eq("Unknown").all():
+        st.rerun()
+
 snap = pd.Timestamp(directory["fetched_at"].max()).date()
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Companies", len(directory), border=True)
@@ -53,12 +63,21 @@ c3.metric("NASDAQ-100", int(directory["nasdaq100"].sum()), border=True)
 c4.metric("Dow 30", int(directory["dow30"].sum()), border=True)
 st.caption(f"Wikipedia snapshot {snap}. A company in more than one index is listed once.")
 
-filters, search_col, refresh_col = st.columns([2, 2, 1])
+filters, sector_col, search_col, refresh_col = st.columns([1.3, 1.6, 1.5, 1])
 chosen = filters.multiselect(
     "Index",
     list(INDEX_FILTERS),
     default=list(INDEX_FILTERS),
     placeholder="Choose at least one index",
+)
+sector_choices = sorted(
+    sector for sector in directory["sector"].dropna().astype(str).unique() if sector and sector != "Unknown"
+)
+chosen_sectors = sector_col.multiselect(
+    "Sector",
+    sector_choices,
+    placeholder="All sectors",
+    help="Show companies in these sectors, then use Select shown to add them.",
 )
 query = search_col.text_input("Search name or ticker", placeholder="Apple or AAPL")
 if refresh_col.button("Refresh list", icon=":material/refresh:", width="stretch"):
@@ -79,6 +98,9 @@ if chosen:
 else:
     view = view.iloc[0:0]
 
+if chosen_sectors:
+    view = view[view["sector"].isin(chosen_sectors)]
+
 if query.strip():
     needle = query.strip().upper()
     view = view[
@@ -86,10 +108,10 @@ if query.strip():
         | view["name"].str.upper().str.contains(needle, regex=False)
     ]
 
-view = view.sort_values(["name", "symbol"]).reset_index(drop=True)
+view = view.sort_values(["sector", "name", "symbol"]).reset_index(drop=True)
 selected = set(st.session_state.selected_company_symbols)
 
-editor = view[["symbol", "name", "indexes"]].copy()
+editor = view[["symbol", "name", "sector", "indexes"]].copy()
 editor.insert(0, "select", editor["symbol"].isin(selected))
 
 edited = st.data_editor(
@@ -99,11 +121,12 @@ edited = st.data_editor(
     height=480,
     num_rows="fixed",
     key=f"company_editor_{st.session_state.company_editor_nonce}_{hash(tuple(editor['symbol']))}",
-    disabled=["symbol", "name", "indexes"],
+    disabled=["symbol", "name", "sector", "indexes"],
     column_config={
         "select": st.column_config.CheckboxColumn("Select", default=False),
         "name": "Company",
         "symbol": "Ticker",
+        "sector": "Sector",
         "indexes": "Index",
     },
 )
@@ -118,9 +141,26 @@ st.caption(
     + (f" · {', '.join(sorted(selected))}" if selected else "")
 )
 
-action_col, cache_col, clear_col = st.columns([1.2, 1.4, 3])
+action_col, sector_btn, cache_col, clear_col = st.columns([1.3, 1.2, 1.3, 1.2])
 use_cache = cache_col.checkbox("Use cached research", value=True)
 run = action_col.button("Submit for analysis", type="primary", icon=":material/play_arrow:")
+if sector_btn.button("Select shown", help=f"Add the companies in the list, up to {MAX_COMPANIES}."):
+    extra = [symbol for symbol in view["symbol"] if symbol not in selected]
+    room = max(0, MAX_COMPANIES - len(selected))
+    take = extra[:room]
+    st.session_state.selected_company_symbols = sorted(selected | set(take))
+    st.session_state.company_editor_nonce += 1
+    if not extra:
+        st.session_state["company_select_note"] = "Every company in the list is already selected."
+    elif len(extra) > len(take):
+        st.session_state["company_select_note"] = (
+            f"Added {len(take)} of {len(extra)} shown companies. A run can include {MAX_COMPANIES}."
+        )
+    else:
+        st.session_state["company_select_note"] = f"Added {len(take)} companies from the list."
+    st.rerun()
+if note := st.session_state.pop("company_select_note", None):
+    st.caption(note)
 if clear_col.button("Clear selection"):
     st.session_state.selected_company_symbols = []
     st.session_state.company_editor_nonce += 1
@@ -131,10 +171,15 @@ if selected:
     picked = directory[directory["symbol"].isin(selected)].sort_values("name")
     with st.expander(f"Selected companies ({len(picked)})", expanded=False):
         st.dataframe(
-            picked[["name", "symbol", "indexes"]],
+            picked[["name", "symbol", "sector", "indexes"]],
             hide_index=True,
             width="stretch",
-            column_config={"name": "Company", "symbol": "Ticker", "indexes": "Index"},
+            column_config={
+                "name": "Company",
+                "symbol": "Ticker",
+                "sector": "Sector",
+                "indexes": "Index",
+            },
         )
 
 def _render_analysis(report: dict) -> None:

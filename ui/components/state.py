@@ -67,6 +67,10 @@ def company_directory(cache_path: str) -> pd.DataFrame:
     for col in ("sp500", "nasdaq100", "dow30"):
         if col in table.columns:
             table[col] = table[col].astype(bool)
+    if "sector" not in table.columns:
+        table["sector"] = "Unknown"
+    else:
+        table["sector"] = table["sector"].fillna("Unknown").astype(str).replace({"": "Unknown"})
     return table
 
 
