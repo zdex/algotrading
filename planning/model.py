@@ -313,6 +313,8 @@ def allocation_drift(
             "actual": actual,
             "gap": gap,
             "status": _status(actual, slice_row, band),
+            "invested": amount,
+            "target_value": None if nav is None else slice_row.target / 100 * nav,
         })
 
     extra_buckets = [name for name in bucket_value if name not in {row.name for row in plan.buckets} and bucket_value[name] > 0]
@@ -326,6 +328,8 @@ def allocation_drift(
             "actual": actual,
             "gap": actual,
             "status": "unplanned",
+            "invested": bucket_value[name],
+            "target_value": 0.0 if nav is not None else None,
         })
 
     sector_rows = []
@@ -389,4 +393,6 @@ def allocation_drift(
         "unclassified": sorted(unclassified),
         "fill_next": fill_next,
         "equity_value": equity_value,
+        "invested": sum(amount for symbol, amount in values.items() if symbol not in set(unclassified)),
+        "outside": sum(values[symbol] for symbol in unclassified),
     }

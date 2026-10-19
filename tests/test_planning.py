@@ -58,6 +58,11 @@ def test_drift_tags_cash_and_fill_next():
     assert by_name["Cash"]["actual"] == 30
     assert by_name["Cash"]["status"] == "above ceiling"
     assert by_name["Developed global equity"]["actual"] == 35
+    assert by_name["Developed global equity"]["invested"] == 350
+    assert by_name["Developed global equity"]["target_value"] == 350
+    assert by_name["Cash"]["invested"] == 300
+    assert drift["invested"] == 650
+    assert drift["outside"] == 50
     assert by_name["Developed global equity"]["status"] == "in band"
     assert by_name["Local equity"]["actual"] == 30
     assert "Emerging equity" in drift["fill_next"]

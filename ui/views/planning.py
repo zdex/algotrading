@@ -270,6 +270,38 @@ def _drift_chart(rows: list[dict], title: str) -> go.Figure:
     return fig
 
 
+def _invested_chart(rows: list[dict], currency: str) -> go.Figure | None:
+    shown = [
+        row for row in rows
+        if (row.get("invested") or 0) > 0 or (row.get("target_value") or 0) > 0
+    ]
+    if not shown:
+        return None
+    names = [row["name"] for row in shown][::-1]
+    invested = [row.get("invested") or 0 for row in shown][::-1]
+    targets = [0 if row.get("target_value") is None else row["target_value"] for row in shown][::-1]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        name="Target", y=names, x=targets, orientation="h",
+        marker=dict(color=t.BENCH_1, cornerradius=3),
+        hovertemplate="%{y} target " + currency + " %{x:,.0f}<extra></extra>",
+    ))
+    fig.add_trace(go.Bar(
+        name="Invested", y=names, x=invested, orientation="h",
+        marker=dict(color=t.STRATEGY, cornerradius=3),
+        hovertemplate="%{y} invested " + currency + " %{x:,.0f}<extra></extra>",
+    ))
+    fig.update_layout(
+        barmode="group",
+        title="Invested and target",
+        height=max(240, 36 * len(shown) + 80),
+        xaxis_title=currency,
+        hovermode="closest",
+        margin=dict(l=8, r=8, t=44, b=8),
+    )
+    return fig
+
+
 def _status_frame(rows: list[dict]) -> pd.DataFrame:
     frame = pd.DataFrame(rows)
     order = ["name", "target", "floor", "ceiling", "actual", "gap", "status"]
@@ -537,8 +569,65 @@ if st.session_state.get("confirm_delete") == plan.id:
         st.session_state.pop("_plan_form", None)
         st.rerun()
 
-st.subheader("Drift")
 drift = allocation_drift(draft, snapshot.positions, snapshot.summary)
+
+st.subheader("Invested in this plan")
+st.caption(
+    "A holding counts once it is tagged to a sleeve. "
+    "Target dollars apply each sleeve target to the portfolio value."
+)
+share = None if not drift["nav"] else drift["invested"] / drift["nav"] * 100
+shortfall = None
+if drift["nav"] is not None:
+    target_invested = sum(
+        row["target_value"] or 0
+        for row in drift["rows"]
+        if row["name"] != "Cash"
+    )
+    shortfall = target_invested - drift["invested"]
+k1, k2, k3, k4 = st.columns(4)
+k1.metric("Invested", t.money(drift["invested"]), border=True)
+k2.metric("Cash", "—" if drift["cash"] is None else t.money(drift["cash"]), border=True)
+k3.metric("Outside the plan", t.money(drift["outside"]), border=True)
+k4.metric("Share of portfolio", "—" if share is None else f"{share:.1f}%", border=True)
+if shortfall is not None and shortfall > 1:
+    st.caption(f"{t.money(shortfall)} still to invest to reach the non-cash sleeve targets.")
+elif shortfall is not None:
+    st.caption("Tagged holdings cover the non-cash sleeve targets.")
+if not drift["invested"] and drift["outside"]:
+    st.info("Tag the holdings above to count them in this plan.", icon=":material/sell:")
+
+invested_rows = []
+for row in drift["rows"]:
+    target_value = row.get("target_value")
+    invested_amount = row.get("invested") or 0
+    invested_rows.append({
+        "sleeve": row["name"],
+        "invested": invested_amount,
+        "target_value": target_value,
+        "gap_value": None if target_value is None else invested_amount - target_value,
+    })
+money_chart = _invested_chart(drift["rows"], draft.currency)
+chart_col, table_col = st.columns([1.15, 1])
+with chart_col:
+    if money_chart is None:
+        st.caption("Invested and target: nothing to chart yet.")
+    else:
+        st.plotly_chart(money_chart, width="stretch", key="invested-bars")
+with table_col:
+    st.dataframe(
+        pd.DataFrame(invested_rows),
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "sleeve": "Sleeve",
+            "invested": st.column_config.NumberColumn(f"Invested ({draft.currency})", format="dollar"),
+            "target_value": st.column_config.NumberColumn(f"Target ({draft.currency})", format="dollar"),
+            "gap_value": st.column_config.NumberColumn(f"Gap ({draft.currency})", format="%+d"),
+        },
+    )
+
+st.subheader("Drift")
 if drift["basis"] == "nav":
     st.caption(
         f"Actual weights use portfolio value {draft.currency} {drift['nav']:,.0f}. "
