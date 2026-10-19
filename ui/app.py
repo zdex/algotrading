@@ -28,6 +28,7 @@ pages = {
     "Overview": [
         st.Page(views / "home.py", title="Command Center", icon=":material/dashboard:", default=True),
         st.Page(views / "portfolio.py", title="Portfolio", icon=":material/account_balance_wallet:"),
+        st.Page(views / "planning.py", title="Planning", icon=":material/pie_chart:"),
     ],
     "Research": [
         st.Page(views / "companies.py", title="Companies", icon=":material/business:"),
