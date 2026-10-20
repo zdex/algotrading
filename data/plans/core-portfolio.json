@@ -8,39 +8,39 @@
   "buckets": [
     {
       "name": "Local equity",
-      "target": 30.0,
-      "floor": 25.0,
-      "ceiling": 37.0
+      "target": 40.0,
+      "floor": 35.0,
+      "ceiling": 45.0
     },
     {
       "name": "Developed global equity",
-      "target": 35.0,
-      "floor": 30.0,
-      "ceiling": 42.0
+      "target": 25.0,
+      "floor": 20.0,
+      "ceiling": 30.0
     },
     {
       "name": "Emerging equity",
-      "target": 10.0,
-      "floor": 5.0,
-      "ceiling": 17.0
+      "target": 15.0,
+      "floor": 10.0,
+      "ceiling": 20.0
     },
     {
       "name": "Fixed income",
       "target": 10.0,
       "floor": 5.0,
-      "ceiling": 17.0
+      "ceiling": 15.0
     },
     {
       "name": "Gold",
       "target": 5.0,
       "floor": 0.0,
-      "ceiling": 12.0
+      "ceiling": 10.0
     },
     {
       "name": "Cash",
-      "target": 10.0,
-      "floor": 5.0,
-      "ceiling": 17.0
+      "target": 5.0,
+      "floor": 0.0,
+      "ceiling": 10.0
     }
   ],
   "sectors": [
@@ -121,5 +121,5 @@
   },
   "classifications": {},
   "created_at": "2026-10-19T18:12:58",
-  "updated_at": "2026-10-19T18:13:46"
+  "updated_at": "2026-10-19T20:31:31"
 }

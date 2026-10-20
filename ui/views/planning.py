@@ -8,9 +8,11 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from agents.agno.llm import generate
 from data.feed import DataFeed
 from execution.portfolio_service import PortfolioBackend
 from planning.backtest import BENCHMARK, SLEEVE_PROXIES, proxy_symbols, run_plan_backtest
+from planning.optimize import PlanTargets, improve_plan
 from planning.model import (
     EQUITY_BUCKETS,
     HORIZONS,
@@ -389,6 +391,21 @@ def _bind_form(current: Plan) -> None:
 
 _bind_form(plan)
 
+pending_mix = st.session_state.pop("_apply_plan_mix", None)
+if isinstance(pending_mix, dict) and pending_mix.get("id") == plan.id:
+    rev = int(st.session_state.get("_mix_rev", 0)) + 1
+    st.session_state["_mix_rev"] = rev
+    pending_mix["rev"] = rev
+    st.session_state["_sleeve_override"] = pending_mix
+    st.session_state["plan_band"] = float(pending_mix["rebalance_band_pct"])
+    st.session_state["_mix_notice"] = (
+        "The adjusted sleeve mix is in the editor. Save the plan when you want the JSON file updated."
+    )
+
+sleeve_override = st.session_state.get("_sleeve_override")
+if not isinstance(sleeve_override, dict) or sleeve_override.get("id") != plan.id:
+    sleeve_override = None
+
 header = st.columns(4)
 header[0].metric("Status", plan.status, border=True)
 header[1].metric("Horizon", plan.horizon, border=True)
@@ -448,16 +465,25 @@ with rules:
     contribution = st.number_input("Monthly contribution", min_value=0.0, step=100.0, key="plan_contribution")
     notes = st.text_area("Notes", height=88, key="plan_notes")
 
+mix_notice = st.session_state.pop("_mix_notice", None)
+if mix_notice:
+    st.success(mix_notice)
+
 st.subheader("Where the money sits")
 st.caption("Local, global, and emerging markets, plus bonds, gold, and cash. Each row is a percent of the whole portfolio. The pie updates when the table does.")
 sleeve_table, sleeve_pie = st.columns([1.35, 1])
+sleeve_source = plan.buckets
+sleeve_key = f"buckets-{plan.id}-{plan.updated_at}"
+if sleeve_override:
+    sleeve_source = [Slice.from_dict(row) for row in sleeve_override.get("buckets") or []]
+    sleeve_key = f"buckets-{plan.id}-mix-{sleeve_override.get('rev')}"
 with sleeve_table:
     bucket_editor = st.data_editor(
-        _slice_frame(plan.buckets),
+        _slice_frame(sleeve_source),
         num_rows="dynamic",
         hide_index=True,
         width="stretch",
-        key=f"buckets-{plan.id}-{plan.updated_at}",
+        key=sleeve_key,
         column_config={"name": "Sleeve", **_number_columns()},
     )
     buckets = _slices_from_editor(bucket_editor)
@@ -559,6 +585,7 @@ save_col, delete_col = st.columns([1, 4])
 with save_col:
     if st.button("Save plan", type="primary", width="stretch", disabled=bool(errors)):
         store.save(draft, make_active=draft.status == "active")
+        st.session_state.pop("_sleeve_override", None)
         st.rerun()
 with delete_col:
     if st.button("Delete plan"):
@@ -571,6 +598,7 @@ if st.session_state.get("confirm_delete") == plan.id:
         st.session_state["_clear_plan"] = True
         st.session_state.pop("confirm_delete", None)
         st.session_state.pop("_plan_form", None)
+        st.session_state.pop("_sleeve_override", None)
         st.rerun()
 
 drift = allocation_drift(draft, snapshot.positions, snapshot.summary)
@@ -808,3 +836,214 @@ if result is not None and st.session_state.get("plan_backtest_id") == draft.id:
         st.caption("Month-end rebalances: " + shown + (f" and {extra} more." if extra > 0 else "."))
     else:
         st.caption("No month-end rebalance. Sleeves stayed inside the band.")
+
+st.subheader("Improve with the model")
+st.caption(
+    "Backtest the mix in the editor, then ask the sidebar model to adjust sleeve targets "
+    "until every selected target passes or the iteration limit is reached. "
+    "The first pass is the current mix and does not call the model. "
+    "The JSON file changes only when you save."
+)
+opt1, opt2, opt3, opt4, opt5 = st.columns(5)
+use_cagr = opt1.checkbox("Min CAGR %", value=True, key="opt_use_cagr")
+cagr_value = opt1.number_input(
+    "CAGR at least",
+    min_value=-50.0,
+    max_value=100.0,
+    value=8.0,
+    step=0.5,
+    key="opt_cagr",
+    disabled=not use_cagr,
+)
+use_drawdown = opt2.checkbox("Max drawdown %", value=True, key="opt_use_dd")
+drawdown_value = opt2.number_input(
+    "Drawdown at most",
+    min_value=0.0,
+    max_value=100.0,
+    value=20.0,
+    step=1.0,
+    key="opt_dd",
+    disabled=not use_drawdown,
+    help="Passes when max drawdown is at or below this ceiling.",
+)
+use_sharpe = opt3.checkbox("Min Sharpe", value=False, key="opt_use_sharpe")
+sharpe_value = opt3.number_input(
+    "Sharpe at least",
+    min_value=-2.0,
+    max_value=5.0,
+    value=0.5,
+    step=0.1,
+    key="opt_sharpe",
+    disabled=not use_sharpe,
+)
+use_return = opt4.checkbox("Min total return %", value=False, key="opt_use_return")
+return_value = opt4.number_input(
+    "Total return at least",
+    min_value=-100.0,
+    max_value=1000.0,
+    value=50.0,
+    step=5.0,
+    key="opt_return",
+    disabled=not use_return,
+)
+max_loops = opt5.number_input(
+    "Max iterations",
+    min_value=1,
+    max_value=8,
+    value=3,
+    step=1,
+    key="opt_iterations",
+    help="From 1 to 8. Each iteration is one backtest. The model is called only when a target is still missed and iterations remain.",
+)
+review_model = (st.session_state.get("llm_model") or "").strip()
+review_provider = (st.session_state.get("llm_provider") or "").strip()
+if review_model:
+    st.caption(f"Reviews use {review_provider} · {review_model}.")
+else:
+    st.caption("Choose a model in the sidebar. The loop will not invent a review without one.")
+
+if st.button("Run improvement loop", type="primary", icon=":material/auto_fix_high:"):
+    selected = PlanTargets(
+        min_cagr_pct=float(cagr_value) if use_cagr else None,
+        max_drawdown_pct=float(drawdown_value) if use_drawdown else None,
+        min_sharpe=float(sharpe_value) if use_sharpe else None,
+        min_total_return_pct=float(return_value) if use_return else None,
+    )
+    loops = int(max_loops)
+    if not selected.enabled():
+        st.warning("Turn on at least one target.")
+    elif loops < 1 or loops > 8:
+        st.warning("Max iterations must be from 1 to 8.")
+    elif not review_provider or not review_model:
+        st.error("Choose a model in the sidebar before running the improvement loop.")
+    elif bt_start >= bt_end:
+        st.error("Start must be before end.")
+    else:
+        symbols = proxy_symbols(draft)
+        end_exclusive = (pd.Timestamp(bt_end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+
+        def _review(prompt: str) -> str:
+            return generate(prompt, provider=review_provider, model=review_model, max_tokens=1200)
+
+        with st.status("Running the improvement loop…", expanded=True) as status_box:
+            try:
+                feed = DataFeed(state.cache_dir())
+                feed.download(symbols, start=str(bt_start), end=end_exclusive)
+                prices = feed.load_prices(symbols, start=str(bt_start), end=end_exclusive)
+
+                def _note(record) -> None:
+                    cagr = record.metrics.get("cagr_pct")
+                    drawdown = record.metrics.get("max_drawdown_pct")
+                    cagr_text = "—" if cagr is None else f"{cagr:.1f}%"
+                    drawdown_text = "—" if drawdown is None else f"{drawdown:.1f}%"
+                    verdict = "passed" if record.passed else "missed"
+                    status_box.write(
+                        f"Iteration {record.number}: CAGR {cagr_text}, max drawdown {drawdown_text}, {verdict}."
+                    )
+
+                outcome = improve_plan(
+                    draft,
+                    prices,
+                    initial_cash=float(bt_cash),
+                    monthly_contribution=float(bt_contribution),
+                    targets=selected,
+                    max_iterations=loops,
+                    llm=_review,
+                    on_iteration=_note,
+                )
+                if outcome.status == "met":
+                    status_box.update(label="Targets met", state="complete")
+                elif outcome.status == "llm_error":
+                    status_box.update(label="Model error", state="error")
+                else:
+                    status_box.update(label="Iteration limit reached", state="complete")
+            except Exception as exc:
+                outcome = None
+                status_box.update(label="Improvement loop stopped", state="error")
+                st.error(str(exc))
+        if outcome is not None:
+            st.session_state["plan_optimize"] = outcome
+            st.session_state["plan_optimize_id"] = draft.id
+            st.session_state["plan_optimize_token"] = st.session_state.get("plan_optimize_token", 0) + 1
+
+outcome = st.session_state.get("plan_optimize")
+if outcome is not None and st.session_state.get("plan_optimize_id") == draft.id:
+    if outcome.status == "met":
+        st.success(f"Targets met on iteration {outcome.best_index + 1}.")
+    elif outcome.status == "llm_error":
+        error_text = outcome.iterations[-1].adjustment_error or "The model returned an error."
+        st.error(error_text)
+        st.warning(
+            f"The target was not reached. Best completed mix is iteration {outcome.best_index + 1} "
+            f"by {outcome.primary}."
+        )
+    else:
+        st.warning(
+            f"Used all {len(outcome.iterations)} iterations. The target was not reached. "
+            f"Best mix is iteration {outcome.best_index + 1} by {outcome.primary}."
+        )
+    table_rows = []
+    for record in outcome.iterations:
+        metrics = record.metrics
+        table_rows.append({
+            "iteration": record.number,
+            "cagr_pct": metrics.get("cagr_pct"),
+            "max_drawdown_pct": metrics.get("max_drawdown_pct"),
+            "sharpe": metrics.get("sharpe"),
+            "total_return_pct": metrics.get("total_return_pct"),
+            "passed": "Yes" if record.passed else "No",
+            "gaps": "; ".join(record.failures),
+            "rationale": record.rationale,
+            "adjustment": record.adjustment_error,
+        })
+    st.dataframe(
+        pd.DataFrame(table_rows),
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "iteration": "Iteration",
+            "cagr_pct": st.column_config.NumberColumn("CAGR %", format="%.2f"),
+            "max_drawdown_pct": st.column_config.NumberColumn("Max drawdown %", format="%.2f"),
+            "sharpe": st.column_config.NumberColumn("Sharpe", format="%.2f"),
+            "total_return_pct": st.column_config.NumberColumn("Total return %", format="%.2f"),
+            "passed": "Passed",
+            "gaps": "Gaps",
+            "rationale": "Rationale",
+            "adjustment": "Adjustment",
+        },
+    )
+    labels = []
+    for index, record in enumerate(outcome.iterations):
+        mark = " · best" if index == outcome.best_index else ""
+        labels.append(f"Iteration {record.number}{mark}")
+    token = st.session_state.get("plan_optimize_token", 0)
+    picked = st.selectbox(
+        "Mix to apply",
+        list(range(len(outcome.iterations))),
+        index=outcome.best_index,
+        format_func=lambda index: labels[index],
+        key=f"opt-mix-{draft.id}-{token}",
+    )
+    chosen = outcome.iterations[picked]
+    st.dataframe(
+        pd.DataFrame(chosen.buckets),
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "name": "Sleeve",
+            "target": st.column_config.NumberColumn("Target %", format="%.1f"),
+            "floor": st.column_config.NumberColumn("Floor %", format="%.1f"),
+            "ceiling": st.column_config.NumberColumn("Ceiling %", format="%.1f"),
+        },
+    )
+    st.caption(
+        f"Rebalance band {chosen.rebalance_band_pct:g} percentage points. "
+        "Use this mix updates the sleeve table and the rebalance band. The JSON file stays as it is until you save."
+    )
+    if st.button("Use this mix"):
+        st.session_state["_apply_plan_mix"] = {
+            "id": draft.id,
+            "buckets": chosen.buckets,
+            "rebalance_band_pct": chosen.rebalance_band_pct,
+        }
+        st.rerun()
