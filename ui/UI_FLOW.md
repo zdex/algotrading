@@ -102,6 +102,14 @@ Files:
 Purpose:
 - render metrics, trade tables, equity curves, risk decisions, and charts after a run finishes.
 
+## Market Monitor
+
+Section in the sidebar, backed by `market_monitor/` (catalog, scoring, workflow) and `ui/market_monitor/` (page layout).
+
+Subsections: Monitor Home, Global Macro, Markets, Corporate Events, Risk Alerts, Sector Rotation, Portfolio Health, Upcoming Catalysts, Decision Log, Event Explorer, Watchlists, Data Sources, Settings.
+
+The feed is a simulated batch. Category 18 is owned by Markets. The Decision Log links to events and keeps an append-only audit trail. See `market_monitor/README.md`.
+
 ## Summary
 
 The `ui` package is the front-end orchestration layer: it builds config, calls the `backtester.runner.run_backtest()` function, displays progress, and then renders the final metrics and artifacts stored in `results/`.

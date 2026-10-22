@@ -46,6 +46,21 @@ pages = {
     "Data": [
         st.Page(views / "universe_data.py", title="Universe & Data", icon=":material/database:"),
     ],
+    "Market Monitor": [
+        st.Page(views / "monitor_overview.py", title="Monitor Home", icon=":material/monitoring:"),
+        st.Page(views / "monitor_macro.py", title="Global Macro", icon=":material/public:"),
+        st.Page(views / "monitor_markets.py", title="Markets", icon=":material/candlestick_chart:"),
+        st.Page(views / "monitor_corporate.py", title="Corporate Events", icon=":material/business:"),
+        st.Page(views / "monitor_risk.py", title="Risk Alerts", icon=":material/warning:"),
+        st.Page(views / "monitor_sector.py", title="Sector Rotation", icon=":material/donut_small:"),
+        st.Page(views / "monitor_portfolio.py", title="Portfolio Health", icon=":material/account_balance:"),
+        st.Page(views / "monitor_catalysts.py", title="Upcoming Catalysts", icon=":material/calendar_month:"),
+        st.Page(views / "monitor_decisions.py", title="Decision Log", icon=":material/history:"),
+        st.Page(views / "monitor_explorer.py", title="Event Explorer", icon=":material/travel_explore:"),
+        st.Page(views / "monitor_watchlists.py", title="Watchlists", icon=":material/star:"),
+        st.Page(views / "monitor_sources.py", title="Data Sources", icon=":material/cloud:"),
+        st.Page(views / "monitor_settings.py", title="Settings", icon=":material/settings:"),
+    ],
 }
 # Hidden so we can put the AI model dropdown above the Overview section.
 nav = st.navigation(pages, position="hidden")
