@@ -23,6 +23,9 @@ requests>=2.31
 # Tests
 pytest>=8
 
+# Trading desk orchestration
+langgraph>=1.0
+
 # Agent / embeddings / vector DB
 qdrant-client>=1.6
 sentence-transformers>=2.2

@@ -1,11 +1,25 @@
 """Catalog ownership, scoring, and the local decision audit."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from market_monitor.adapters import DemoEventAdapter, DemoSeriesAdapter
-from market_monitor.catalog import EVENTS, collapse_events, primary_events
+from market_monitor.catalog import AS_OF, EVENTS, collapse_events, primary_events
+from market_monitor.series import (
+    breadth,
+    category_history,
+    credit_spreads,
+    growth_inflation,
+    liquidity_gauge,
+    macro_chart_kinds,
+    macro_surprise,
+    panel_chart_kinds,
+    rate_path,
+    sector_performance,
+    subset_by_geography,
+    subset_by_time,
+)
 from market_monitor.model import Decision
 from market_monitor.query import exposure_pct, filter_events, format_dual_time, freshness, resolve_book, risk_feed, scheduled_events
 from market_monitor.registry import CATEGORIES, category, ownership_counts
@@ -113,6 +127,56 @@ def test_decision_history_is_append_only(tmp_path):
         store.dismiss("MM-01-000", "critical")
     store.dismiss("MM-01-000", "info")
     assert store.effective_status("MM-01-000", "new") == "dismissed"
+
+
+def test_macro_charts_follow_geography_category_and_window():
+    everyone = subset_by_geography(growth_inflation(), "country", None)
+    assert everyone["country"].nunique() == 6
+    japan = subset_by_geography(growth_inflation(), "country", "Japan")
+    assert list(japan["country"]) == ["Japan"]
+    assert subset_by_geography(growth_inflation(), "country", "Taiwan").empty
+    assert macro_chart_kinds(None) == frozenset({"surprise", "quadrant", "rates", "curve", "scorecard"})
+    assert macro_chart_kinds(1) == frozenset({"surprise", "quadrant"})
+    assert macro_chart_kinds(2) == frozenset({"rates", "curve"})
+    assert macro_chart_kinds(5) == frozenset()
+    path = subset_by_geography(rate_path(), "country", "United States")
+    assert list(path["policy_rate"]) == [4.50, 4.50, 4.25, 4.25, 4.00, 4.00, 3.75, 3.75]
+    trimmed = subset_by_time(subset_by_geography(rate_path(), "country", "Japan"), AS_OF - timedelta(days=7), AS_OF)
+    assert 1 <= len(trimmed) <= 2
+    assert set(trimmed["country"]) == {"Japan"}
+    surprise = macro_surprise()
+    assert surprise.equals(macro_surprise())
+    assert list(surprise["indicator"].unique()) == ["CPI", "Core CPI", "Payrolls", "PMI", "Retail sales", "GDP"]
+    assert category_history(1).equals(category_history(1))
+    assert not category_history(1)["value"].equals(category_history(2)["value"])
+
+
+def test_other_panels_follow_category_and_stay_stable():
+    assert panel_chart_kinds("markets", None) == frozenset(
+        {"ribbon", "map", "liquidity", "breadth", "vol", "commodities", "fx", "crypto"}
+    )
+    assert panel_chart_kinds("markets", 6) == frozenset({"liquidity"})
+    assert panel_chart_kinds("markets", 7) == frozenset({"ribbon", "map", "breadth", "vol"})
+    assert panel_chart_kinds("markets", 9) == frozenset({"commodities"})
+    assert panel_chart_kinds("markets", 10) == frozenset({"fx"})
+    assert panel_chart_kinds("markets", 18) == frozenset({"crypto"})
+    assert panel_chart_kinds("markets", 99) == panel_chart_kinds("markets", None)
+    assert panel_chart_kinds("corporate", 3) == frozenset({"earnings", "guidance", "calendar"})
+    assert panel_chart_kinds("corporate", 14) == frozenset({"governance"})
+    assert "spreads" in panel_chart_kinds("risk", None)
+    assert "spreads" not in panel_chart_kinds("risk", 4)
+    assert panel_chart_kinds("risk", 12) == frozenset({"spreads"})
+    assert panel_chart_kinds("risk", 16) == frozenset({"geography", "hazards"})
+    assert panel_chart_kinds("sector", 8) == frozenset({"performance", "revisions", "valuation", "constituents"})
+    assert panel_chart_kinds("sector", 15) == frozenset({"themes"})
+    assert panel_chart_kinds("portfolio", 13) == frozenset({"funds"})
+    assert "funds" not in panel_chart_kinds("portfolio", 20)
+    assert liquidity_gauge().equals(liquidity_gauge())
+    assert breadth().equals(breadth())
+    assert credit_spreads().equals(credit_spreads())
+    assert sector_performance().equals(sector_performance())
+    trimmed = subset_by_time(credit_spreads(), AS_OF - timedelta(days=30), AS_OF)
+    assert len(trimmed) < len(credit_spreads())
 
 
 def test_demo_adapters_do_not_pretend_to_be_live():

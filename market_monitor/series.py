@@ -9,7 +9,14 @@ import pandas as pd
 
 from market_monitor.catalog import AS_OF
 
-_RNG = np.random.default_rng(20)
+
+def _rng(seed: int) -> np.random.Generator:
+    """Fresh generator so a simulated series is the same on every call.
+
+    A shared generator advances on each Streamlit rerun, so the same filter
+    would draw a different chart.
+    """
+    return np.random.default_rng(seed)
 
 
 def _dates(n: int = 18) -> list[datetime]:
@@ -20,11 +27,12 @@ def _dates(n: int = 18) -> list[datetime]:
 def macro_surprise() -> pd.DataFrame:
     countries = ["United States", "Euro area", "United Kingdom", "Japan", "China", "India"]
     indicators = ["CPI", "Core CPI", "Payrolls", "PMI", "Retail sales", "GDP"]
+    rng = _rng(20)
     rows = []
     for country in countries:
-        for index, indicator in enumerate(indicators):
-            yoy = round(float(_RNG.normal(0, 0.6)), 2)
-            mom = round(yoy / 3 + float(_RNG.normal(0, 0.15)), 2)
+        for indicator in indicators:
+            yoy = round(float(rng.normal(0, 0.6)), 2)
+            mom = round(yoy / 3 + float(rng.normal(0, 0.15)), 2)
             rows.append({"country": country, "indicator": indicator, "yoy": yoy, "mom": mom})
     return pd.DataFrame(rows)
 
@@ -42,29 +50,139 @@ def growth_inflation() -> pd.DataFrame:
 
 def rate_path() -> pd.DataFrame:
     dates = _dates(8)
-    frame = pd.DataFrame({
-        "date": dates,
-        "policy_rate": [4.50, 4.50, 4.25, 4.25, 4.00, 4.00, 3.75, 3.75],
-        "futures_implied": [4.48, 4.42, 4.20, 4.05, 3.90, 3.82, 3.70, 3.60],
-    })
-    return frame
+    series = {
+        "United States": (
+            [4.50, 4.50, 4.25, 4.25, 4.00, 4.00, 3.75, 3.75],
+            [4.48, 4.42, 4.20, 4.05, 3.90, 3.82, 3.70, 3.60],
+        ),
+        "Euro area": (
+            [3.50, 3.25, 3.00, 2.75, 2.50, 2.50, 2.25, 2.25],
+            [3.40, 3.10, 2.85, 2.60, 2.40, 2.30, 2.15, 2.10],
+        ),
+        "United Kingdom": (
+            [4.75, 4.50, 4.50, 4.25, 4.00, 4.00, 3.75, 3.75],
+            [4.60, 4.40, 4.20, 4.00, 3.85, 3.70, 3.60, 3.50],
+        ),
+        "Japan": (
+            [0.25, 0.25, 0.50, 0.50, 0.50, 0.75, 0.75, 0.75],
+            [0.30, 0.40, 0.45, 0.55, 0.60, 0.70, 0.80, 0.85],
+        ),
+        "China": (
+            [3.35, 3.35, 3.10, 3.10, 3.00, 3.00, 2.90, 2.90],
+            [3.20, 3.10, 3.00, 2.95, 2.90, 2.85, 2.80, 2.75],
+        ),
+        "India": (
+            [6.50, 6.50, 6.50, 6.25, 6.25, 6.00, 6.00, 5.75],
+            [6.40, 6.35, 6.20, 6.10, 6.00, 5.90, 5.80, 5.70],
+        ),
+    }
+    rows = []
+    for country, (policy, implied) in series.items():
+        for date, policy_rate, futures_implied in zip(dates, policy, implied):
+            rows.append({
+                "date": date,
+                "country": country,
+                "policy_rate": policy_rate,
+                "futures_implied": futures_implied,
+            })
+    return pd.DataFrame(rows)
 
 
 def yield_curve() -> pd.DataFrame:
-    return pd.DataFrame({
-        "tenor": ["1M", "3M", "2Y", "5Y", "10Y", "30Y"],
-        "yield_pct": [4.15, 4.05, 3.72, 3.68, 3.95, 4.22],
-    })
+    tenors = ["1M", "3M", "2Y", "5Y", "10Y", "30Y"]
+    curves = {
+        "United States": [4.15, 4.05, 3.72, 3.68, 3.95, 4.22],
+        "Euro area": [3.20, 3.05, 2.40, 2.35, 2.55, 2.80],
+        "United Kingdom": [4.40, 4.30, 3.90, 3.85, 4.05, 4.40],
+        "Japan": [0.20, 0.25, 0.55, 0.75, 1.05, 2.10],
+        "China": [1.50, 1.55, 1.60, 1.70, 1.85, 2.10],
+        "India": [6.40, 6.35, 6.20, 6.25, 6.45, 6.80],
+    }
+    rows = []
+    for country, yields in curves.items():
+        for tenor, yield_pct in zip(tenors, yields):
+            rows.append({"country": country, "tenor": tenor, "yield_pct": yield_pct})
+    return pd.DataFrame(rows)
 
 
 def regional_scorecard() -> pd.DataFrame:
     return pd.DataFrame([
         {"region": "United States", "growth": "Slowing, still positive", "inflation": "Near 2%", "policy": "Easing bias", "watch": "Labor revisions"},
         {"region": "Euro area", "growth": "Soft", "inflation": "Close to target", "policy": "On hold", "watch": "Energy"},
+        {"region": "United Kingdom", "growth": "Modest", "inflation": "Above target", "policy": "Easing", "watch": "Fiscal"},
         {"region": "China", "growth": "Uneven", "inflation": "Low", "policy": "Targeted support", "watch": "Property"},
         {"region": "India", "growth": "Firm", "inflation": "Contained", "policy": "Meeting ahead", "watch": "Local flows"},
         {"region": "Japan", "growth": "Modest", "inflation": "Around 2%", "policy": "Normalization", "watch": "Yen"},
     ])
+
+
+# Charts that belong to a Global Macro category. None means every category.
+MACRO_CHARTS = {
+    None: frozenset({"surprise", "quadrant", "rates", "curve", "scorecard"}),
+    1: frozenset({"surprise", "quadrant"}),
+    2: frozenset({"rates", "curve"}),
+    5: frozenset(),
+    11: frozenset({"quadrant", "scorecard"}),
+}
+
+
+def macro_chart_kinds(category_id: int | None) -> frozenset[str]:
+    return MACRO_CHARTS.get(category_id, MACRO_CHARTS[None])
+
+
+# Charts that belong to a category on the other monitor panels.
+# None means every chart for that panel. An unknown category uses the same set.
+PANEL_CHARTS = {
+    "markets": {
+        None: frozenset({"ribbon", "map", "liquidity", "breadth", "vol", "commodities", "fx", "crypto"}),
+        6: frozenset({"liquidity"}),
+        7: frozenset({"ribbon", "map", "breadth", "vol"}),
+        9: frozenset({"commodities"}),
+        10: frozenset({"fx"}),
+        18: frozenset({"crypto"}),
+    },
+    "corporate": {
+        None: frozenset({"earnings", "guidance", "calendar", "governance"}),
+        3: frozenset({"earnings", "guidance", "calendar"}),
+        14: frozenset({"governance"}),
+    },
+    "risk": {
+        None: frozenset({"spreads", "geography", "holdings", "geopolitics", "hazards"}),
+        4: frozenset({"geography", "geopolitics"}),
+        12: frozenset({"spreads"}),
+        16: frozenset({"geography", "hazards"}),
+    },
+    "sector": {
+        None: frozenset({"performance", "revisions", "valuation", "themes", "constituents"}),
+        8: frozenset({"performance", "revisions", "valuation", "constituents"}),
+        15: frozenset({"themes"}),
+    },
+    "portfolio": {
+        None: frozenset({"allocation", "weights", "history", "factors", "funds", "stress", "concentration"}),
+        13: frozenset({"funds"}),
+        20: frozenset({"allocation", "weights", "history", "factors", "stress", "concentration"}),
+    },
+}
+
+
+def panel_chart_kinds(panel_id: str, category_id: int | None) -> frozenset[str]:
+    table = PANEL_CHARTS[panel_id]
+    return table.get(category_id, table[None])
+
+
+def subset_by_geography(frame: pd.DataFrame, column: str, geography: str | None) -> pd.DataFrame:
+    if not geography:
+        return frame.reset_index(drop=True)
+    return frame.loc[frame[column] == geography].reset_index(drop=True)
+
+
+def subset_by_time(frame: pd.DataFrame, time_from: datetime | None, time_to: datetime | None) -> pd.DataFrame:
+    out = frame
+    if time_from is not None:
+        out = out.loc[pd.to_datetime(out["date"], utc=True) >= pd.Timestamp(time_from)]
+    if time_to is not None:
+        out = out.loc[pd.to_datetime(out["date"], utc=True) <= pd.Timestamp(time_to)]
+    return out.reset_index(drop=True)
 
 
 def ticker_ribbon() -> pd.DataFrame:
@@ -97,18 +215,20 @@ def market_map() -> pd.DataFrame:
 
 def liquidity_gauge() -> pd.DataFrame:
     dates = _dates(12)
+    rng = _rng(21)
     return pd.DataFrame({
         "date": dates,
-        "conditions_index": np.round(np.linspace(-0.4, 0.3, len(dates)) + _RNG.normal(0, 0.05, len(dates)), 2),
+        "conditions_index": np.round(np.linspace(-0.4, 0.3, len(dates)) + rng.normal(0, 0.05, len(dates)), 2),
     })
 
 
 def breadth() -> pd.DataFrame:
     dates = _dates(12)
+    rng = _rng(22)
     return pd.DataFrame({
         "date": dates,
-        "pct_above_200d": np.clip(np.round(62 + _RNG.normal(0, 4, len(dates)), 1), 20, 90),
-        "advance_decline": np.round(_RNG.normal(0.1, 0.4, len(dates)), 2),
+        "pct_above_200d": np.clip(np.round(62 + rng.normal(0, 4, len(dates)), 1), 20, 90),
+        "advance_decline": np.round(rng.normal(0.1, 0.4, len(dates)), 2),
     })
 
 
@@ -152,10 +272,11 @@ def crypto_board() -> pd.DataFrame:
 
 def credit_spreads() -> pd.DataFrame:
     dates = _dates(16)
+    rng = _rng(23)
     return pd.DataFrame({
         "date": dates,
-        "ig_bps": np.round(95 + _RNG.normal(0, 2, len(dates)).cumsum() * 0.3, 1),
-        "hy_bps": np.round(320 + _RNG.normal(0, 4, len(dates)).cumsum() * 0.4, 1),
+        "ig_bps": np.round(95 + rng.normal(0, 2, len(dates)).cumsum() * 0.3, 1),
+        "hy_bps": np.round(320 + rng.normal(0, 4, len(dates)).cumsum() * 0.4, 1),
     })
 
 
@@ -165,17 +286,18 @@ def sector_performance() -> pd.DataFrame:
         "Consumer Discretionary", "Consumer Staples", "Utilities", "Materials",
         "Real Estate", "Communication Services",
     ]
+    rng = _rng(24)
     rows = []
     for sector in sectors:
-        base = float(_RNG.normal(0, 1.2))
+        base = float(rng.normal(0, 1.2))
         rows.append({
             "sector": sector,
             "1W": round(base * 0.4, 2),
             "1M": round(base, 2),
             "3M": round(base * 2.1, 2),
             "1Y": round(base * 4.0, 2),
-            "revision": round(float(_RNG.normal(0, 0.4)), 2),
-            "valuation_percentile": int(np.clip(50 + _RNG.normal(0, 18), 5, 95)),
+            "revision": round(float(rng.normal(0, 0.4)), 2),
+            "valuation_percentile": int(np.clip(50 + rng.normal(0, 18), 5, 95)),
         })
     return pd.DataFrame(rows)
 
@@ -220,8 +342,9 @@ def earnings_board() -> pd.DataFrame:
 
 def portfolio_history() -> pd.DataFrame:
     dates = [AS_OF - timedelta(days=20 - i) for i in range(21)]
-    equity = 1_000_000 * (1 + np.cumsum(_RNG.normal(0.0004, 0.006, len(dates))))
-    benchmark = 1_000_000 * (1 + np.cumsum(_RNG.normal(0.0003, 0.005, len(dates))))
+    rng = _rng(25)
+    equity = 1_000_000 * (1 + np.cumsum(rng.normal(0.0004, 0.006, len(dates))))
+    benchmark = 1_000_000 * (1 + np.cumsum(rng.normal(0.0003, 0.005, len(dates))))
     peak = np.maximum.accumulate(equity)
     drawdown = equity / peak - 1
     vol = pd.Series(equity).pct_change().rolling(5).std() * np.sqrt(252) * 100
@@ -267,7 +390,7 @@ def fund_quality() -> pd.DataFrame:
 def category_history(category_id: int) -> pd.DataFrame:
     dates = _dates(12)
     base = 2 + (category_id % 5)
-    values = np.round(base + np.cumsum(_RNG.normal(0, 0.15, len(dates))), 2)
+    values = np.round(base + np.cumsum(_rng(100 + category_id).normal(0, 0.15, len(dates))), 2)
     return pd.DataFrame({"date": dates, "value": values})
 
 

@@ -41,6 +41,7 @@ pages = {
     ],
     "Trading": [
         st.Page(views / "paper.py", title="Paper Trading", icon=":material/trending_up:"),
+        st.Page(views / "trading_agent.py", title="Trading Agent", icon=":material/account_tree:"),
         st.Page(views / "live.py", title="Live Trading", icon=":material/sensors:"),
     ],
     "Data": [

@@ -1,0 +1,29 @@
+[
+  {
+    "symbol": "GOOGL",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent buy +0.50. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-14T23:19:02",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "GOOGL",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent buy +0.50. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-14T23:19:29",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "META",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent flat +0.00. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-14T23:19:31",
+    "route": "paper blotter"
+  }
+]

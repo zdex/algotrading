@@ -219,4 +219,5 @@ __marimo__/
 .streamlit/secrets.toml
 data/sample_cache/
 data/agents/research/
+data/market_monitor/
 results/

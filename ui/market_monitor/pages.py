@@ -13,7 +13,7 @@ from market_monitor.catalog import AS_OF, demo_nav
 from market_monitor.model import Event
 from market_monitor.query import countdown_days, risk_feed, rule_matches, scheduled_events
 from market_monitor.registry import PANELS, categories_for, category, panel
-from market_monitor.series import category_history, sector_performance
+from market_monitor.series import category_history, panel_chart_kinds, sector_performance
 from ui.components import theme as t
 from ui.market_monitor import panels
 from ui.market_monitor import widgets as w
@@ -104,33 +104,26 @@ def render_panel(panel_id: str) -> None:
     filters["category_id"] = category_id
     rows, hidden = w.apply_filters(pool, filters, workflow)
     if panel_id == "macro":
-        country = st.selectbox(
-            "Country lens",
-            ["All"] + sorted({geo for event in pool for geo in event.geography}),
-            key="macro-country",
-        )
-        if country != "All":
-            rows = [(event, status) for event, status in rows if country in event.geography]
-        macro_charts = panels.macro_charts
-        macro_charts()
+        panels.macro_charts(filters)
     elif panel_id == "markets":
-        panels.markets_charts()
+        panels.markets_charts(filters)
     elif panel_id == "corporate":
-        panels.corporate_charts([event for event, _status in rows])
-        gov = [(event, status) for event, status in rows if event.category_id == 14]
-        st.subheader("Governance alert feed")
-        if gov:
-            st.dataframe(w.event_frame(gov, workflow).drop(columns=["id"]), hide_index=True, width="stretch")
-        else:
-            st.caption("No governance events in the current filter.")
+        panels.corporate_charts([event for event, _status in rows], filters)
+        if "governance" in panel_chart_kinds("corporate", category_id):
+            gov = [(event, status) for event, status in rows if event.category_id == 14]
+            st.subheader("Governance alert feed")
+            if gov:
+                st.dataframe(w.event_frame(gov, workflow).drop(columns=["id"]), hide_index=True, width="stretch")
+            else:
+                st.caption("No governance events in the current filter.")
     elif panel_id == "risk":
-        panels.risk_charts()
-        _risk_context(rows, workflow)
+        panels.risk_charts(filters)
+        _risk_context(rows, workflow, filters)
     elif panel_id == "sector":
-        panels.sector_charts()
+        panels.sector_charts(filters)
     elif panel_id == "portfolio":
         holdings, _note = w.book(workflow)
-        panels.portfolio_charts(holdings, workflow.preferences().get("book", "demo"))
+        panels.portfolio_charts(holdings, workflow.preferences().get("book", "demo"), filters)
         _manual_holdings(workflow)
     elif panel_id == "catalysts":
         _catalyst_views(rows, workflow)
@@ -141,40 +134,47 @@ def render_panel(panel_id: str) -> None:
     w.render_feed(panel_id, rows, workflow, hidden)
 
 
-def _risk_context(rows, workflow) -> None:
+def _risk_context(rows, workflow, filters: dict) -> None:
+    kinds = panel_chart_kinds("risk", filters.get("category_id"))
     holdings, note = w.book(workflow)
-    st.subheader("Geography")
-    if rows:
-        counts = pd.Series([geo for event, _status in rows for geo in event.geography]).value_counts()
-        fig = go.Figure(go.Bar(x=counts.index.tolist(), y=counts.values.tolist(), marker_color=t.SERIES[3]))
-        fig.update_layout(title="Events by geography", height=300)
-        st.plotly_chart(fig, width="stretch")
-    st.write(note)
-    st.subheader("Affected holdings")
-    if not holdings:
-        st.warning("Holdings are unavailable, so affected positions cannot be listed.")
-    else:
-        hit_rows = []
-        for event, status in rows:
-            overlap = [row.symbol for row in holdings if row.symbol in event.instruments]
-            if overlap:
-                hit_rows.append({"event": event.title, "severity": event.severity, "status": status, "holdings": ", ".join(overlap)})
-        if hit_rows:
-            st.dataframe(pd.DataFrame(hit_rows), hide_index=True, width="stretch")
+    if "geography" in kinds:
+        st.subheader("Geography")
+        if rows:
+            counts = pd.Series([geo for event, _status in rows for geo in event.geography]).value_counts()
+            fig = go.Figure(go.Bar(x=counts.index.tolist(), y=counts.values.tolist(), marker_color=t.SERIES[3]))
+            fig.update_layout(title="Events by geography", height=300)
+            st.plotly_chart(fig, width="stretch")
         else:
-            st.info("No holding symbol is on the events in this filter. Exposure stays unknown.")
-    st.subheader("Geopolitical timeline")
-    geo = [(event, status) for event, status in rows if event.category_id == 4]
-    if geo:
-        st.dataframe(w.event_frame(geo, workflow).drop(columns=["id"]), hide_index=True, width="stretch")
-    else:
-        st.caption("No geopolitical events in this filter.")
-    st.subheader("Natural hazard alerts")
-    hazards = [(event, status) for event, status in rows if event.category_id == 16]
-    if hazards:
-        st.dataframe(w.event_frame(hazards, workflow).drop(columns=["id"]), hide_index=True, width="stretch")
-    else:
-        st.caption("No hazard events in this filter.")
+            st.caption("No events in this filter.")
+        st.write(note)
+    if "holdings" in kinds:
+        st.subheader("Affected holdings")
+        if not holdings:
+            st.warning("Holdings are unavailable, so affected positions cannot be listed.")
+        else:
+            hit_rows = []
+            for event, status in rows:
+                overlap = [row.symbol for row in holdings if row.symbol in event.instruments]
+                if overlap:
+                    hit_rows.append({"event": event.title, "severity": event.severity, "status": status, "holdings": ", ".join(overlap)})
+            if hit_rows:
+                st.dataframe(pd.DataFrame(hit_rows), hide_index=True, width="stretch")
+            else:
+                st.info("No holding symbol is on the events in this filter. Exposure stays unknown.")
+    if "geopolitics" in kinds:
+        st.subheader("Geopolitical timeline")
+        geo = [(event, status) for event, status in rows if event.category_id == 4]
+        if geo:
+            st.dataframe(w.event_frame(geo, workflow).drop(columns=["id"]), hide_index=True, width="stretch")
+        else:
+            st.caption("No geopolitical events in this filter.")
+    if "hazards" in kinds:
+        st.subheader("Natural hazard alerts")
+        hazards = [(event, status) for event, status in rows if event.category_id == 16]
+        if hazards:
+            st.dataframe(w.event_frame(hazards, workflow).drop(columns=["id"]), hide_index=True, width="stretch")
+        else:
+            st.caption("No hazard events in this filter.")
 
 
 def _catalyst_views(rows, workflow) -> None:
