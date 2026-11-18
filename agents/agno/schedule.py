@@ -1,7 +1,8 @@
 """Run the trading desk on a clock after the user starts it.
 
-The first pass can fire immediately. Later passes follow either a fixed
-interval or a daily clock time. APScheduler keeps the job on this process.
+The first pass can fire immediately. Later passes follow a fixed interval, or
+a daily, monthly, or quarterly clock time. APScheduler keeps the job on this
+process.
 """
 from __future__ import annotations
 
@@ -17,11 +18,13 @@ from apscheduler.triggers.interval import IntervalTrigger
 from agents.agno.trading_desk import DEFAULT_ORDERS, DeskCompany, TradingDesk
 
 SCHEDULE_CHOICES = (
-    ("Every 15 minutes", 15),
-    ("Every 30 minutes", 30),
-    ("Every hour", 60),
-    ("Every 4 hours", 240),
-    ("Daily", None),
+    ("Every 15 minutes", "interval", 15),
+    ("Every 30 minutes", "interval", 30),
+    ("Every hour", "interval", 60),
+    ("Every 4 hours", "interval", 240),
+    ("Daily", "daily", None),
+    ("Monthly", "monthly", None),
+    ("Quarterly", "quarterly", None),
 )
 
 
@@ -29,27 +32,50 @@ SCHEDULE_CHOICES = (
 class DeskSchedule:
     every_minutes: int | None = 30
     daily_at: time | None = None
+    cadence: str = "interval"
+
+    @property
+    def kind(self) -> str:
+        """Interval, or a clock. A missing interval stays daily for older callers."""
+        if self.cadence == "interval" and self.every_minutes is None:
+            return "daily"
+        return self.cadence
 
     def label(self) -> str:
-        if self.every_minutes:
-            if self.every_minutes % 60 == 0:
-                hours = self.every_minutes // 60
+        if self.kind == "interval":
+            minutes = self.every_minutes or 0
+            if minutes % 60 == 0 and minutes:
+                hours = minutes // 60
                 unit = "hour" if hours == 1 else "hours"
                 return f"every {hours} {unit}"
-            return f"every {self.every_minutes} minutes"
+            return f"every {minutes} minutes"
         if self.daily_at is None:
-            raise ValueError("A daily schedule needs a clock time.")
-        return f"daily at {self.daily_at.strftime('%H:%M')}"
+            raise ValueError("This schedule needs a clock time.")
+        clock = self.daily_at.strftime("%H:%M")
+        if self.kind == "daily":
+            return f"daily at {clock}"
+        if self.kind == "monthly":
+            return f"monthly on day 1 at {clock}"
+        if self.kind == "quarterly":
+            return f"quarterly on day 1 (Jan, Apr, Jul, Oct) at {clock}"
+        raise ValueError(f"Unknown schedule {self.kind}.")
 
 
 def trigger_for(schedule: DeskSchedule):
-    if schedule.every_minutes:
-        if schedule.every_minutes < 1:
+    if schedule.kind == "interval":
+        if not schedule.every_minutes or schedule.every_minutes < 1:
             raise ValueError("The interval has to be at least one minute.")
         return IntervalTrigger(minutes=schedule.every_minutes)
     if schedule.daily_at is None:
-        raise ValueError("A daily schedule needs a clock time.")
-    return CronTrigger(hour=schedule.daily_at.hour, minute=schedule.daily_at.minute)
+        raise ValueError("This schedule needs a clock time.")
+    clock = {"hour": schedule.daily_at.hour, "minute": schedule.daily_at.minute}
+    if schedule.kind == "daily":
+        return CronTrigger(**clock)
+    if schedule.kind == "monthly":
+        return CronTrigger(day=1, **clock)
+    if schedule.kind == "quarterly":
+        return CronTrigger(month="1,4,7,10", day=1, **clock)
+    raise ValueError(f"Unknown schedule {schedule.kind}.")
 
 
 class ScheduledRunner:
@@ -82,8 +108,8 @@ class ScheduledRunner:
         if self._scheduler.running:
             raise RuntimeError("The agent is already scheduled.")
         now = datetime.now().astimezone()
-        if self.schedule.every_minutes:
-            first = now if immediate else now + timedelta(minutes=self.schedule.every_minutes)
+        if self.schedule.kind == "interval":
+            first = now if immediate else now + timedelta(minutes=self.schedule.every_minutes or 0)
         else:
             first = now if immediate else None
         options = {

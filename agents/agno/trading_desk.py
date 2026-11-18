@@ -20,7 +20,6 @@ from langgraph.graph import END, START, StateGraph
 from agents.agno.analysis_agents import FundamentalAnalysis, SentimentAnalysis
 from agents.agno.config import ROOT
 
-MAX_COMPANIES = 5
 AGENT_NAMES = (
     "Web agent",
     "Web signal agent",
@@ -327,8 +326,6 @@ class TradingDesk:
         self.graph = self._build_graph()
 
     def run(self, companies: list[DeskCompany], on_update: ProgressFn | None = None) -> DeskState:
-        if len(companies) > MAX_COMPANIES:
-            raise ValueError(f"The trading agent accepts {MAX_COMPANIES} companies at a time.")
         state = DeskState(
             roster={name: "idle" for name in AGENT_NAMES},
             detail={name: "Waiting" for name in AGENT_NAMES},

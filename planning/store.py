@@ -22,6 +22,8 @@ class PlanStore:
     def list_plans(self) -> list[Plan]:
         plans: list[Plan] = []
         for path in sorted(self.directory.glob("*.json")):
+            if path.name.startswith("_"):
+                continue
             plan = self._read(path)
             if plan is not None:
                 plans.append(plan)

@@ -10,7 +10,6 @@ import streamlit as st
 from agents.agno.schedule import SCHEDULE_CHOICES, DeskSchedule, ScheduledRunner
 from agents.agno.trading_desk import (
     DEFAULT_ORDERS,
-    MAX_COMPANIES,
     DeskCompany,
     load_orders,
 )
@@ -22,14 +21,6 @@ st.caption(
     "and technical agents on that cadence. Each pass scores the companies and the execution agent queues "
     "a paper order when the sources agree. Orders stay on this blotter and are not sent to a broker."
 )
-
-_BADGE = {
-    "running": ":orange-badge[Running]",
-    "done": ":green-badge[Done]",
-    "error": ":red-badge[Error]",
-    "idle": ":gray-badge[Idle]",
-}
-
 
 def _book() -> list[dict]:
     if "trading_agent_book" not in st.session_state:
@@ -75,13 +66,9 @@ def _add_rows(rows: list[dict]) -> None:
     book = _book()
     have = {row["symbol"] for row in book}
     added = 0
-    skipped = 0
     for row in rows:
         symbol = str(row.get("symbol", "")).strip().upper()
         if not symbol or symbol in have:
-            continue
-        if len(book) >= MAX_COMPANIES:
-            skipped += 1
             continue
         book.append({
             "symbol": symbol,
@@ -90,12 +77,8 @@ def _add_rows(rows: list[dict]) -> None:
         })
         have.add(symbol)
         added += 1
-    if added and skipped:
-        _notice(f"Added {added}. The agent holds {MAX_COMPANIES} companies at a time, so {skipped} were left out.")
-    elif added:
+    if added:
         _notice(f"Added {added} {'company' if added == 1 else 'companies'}.")
-    elif skipped:
-        _notice(f"The agent already has {MAX_COMPANIES} companies. Remove one before adding more.")
     else:
         _notice("Those companies are already on the agent.")
 
@@ -142,14 +125,20 @@ def _render_index_tab(directory: pd.DataFrame, index_column: str) -> None:
         return
     columns = [column for column in _PICK_COLUMNS if column in view.columns]
     editor = view[columns].copy()
-    editor.insert(0, "select", False)
+    list_key = f"{index_column}-{sector}-{hash(tuple(editor['symbol']))}"
+    select_all = st.checkbox(
+        "Select all",
+        key=f"trading-agent-select-all-{list_key}",
+        help="Check every company in this list.",
+    )
+    editor.insert(0, "select", bool(select_all))
     edited = st.data_editor(
         editor,
         hide_index=True,
         width="stretch",
         height=420,
         num_rows="fixed",
-        key=f"trading-agent-editor-{index_column}-{sector}-{hash(tuple(editor['symbol']))}",
+        key=f"trading-agent-editor-{list_key}-{int(bool(select_all))}",
         disabled=columns,
         column_config={name: _COLUMN_CONFIG[name] for name in editor.columns if name in _COLUMN_CONFIG},
     )
@@ -176,46 +165,59 @@ def _render_index_tab(directory: pd.DataFrame, index_column: str) -> None:
     if shown_col.button(
         "Select shown",
         key=f"trading-agent-shown-{index_column}",
-        help=f"Add the companies in this list, up to {MAX_COMPANIES}.",
+        help="Add every company in this list.",
         width="stretch",
     ):
         _add_rows(view[columns].to_dict(orient="records"))
         st.rerun()
 
 
-def _paint(payload: dict) -> None:
+def _grouped(rows: list[dict], key: str) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(str(row.get(key) or ""), []).append(row)
+    return grouped
+
+
+def _paint(payload: dict, companies: list, key_prefix: str) -> None:
     roster = payload.get("roster") or []
     running = [row["agent"] for row in roster if row.get("status") == "running"]
-    st.subheader("Workers")
-    st.markdown(", ".join(running) if running else "None")
-    st.subheader("Agents")
-    if not roster:
-        st.caption("Start the agent to see the workers.")
-    for row in roster:
-        badge = _BADGE.get(row.get("status"), row.get("status", ""))
-        st.markdown(f"{badge} **{row['agent']}** · {row.get('detail') or 'Waiting'}")
-    st.subheader("Agent output")
-    log = payload.get("log") or []
-    if not log:
-        st.caption("Output appears here as each agent finishes.")
-    for line in log:
-        st.markdown(f"**{line['agent']}** · `{line['symbol']}`")
-        st.text(line.get("text") or "")
-    decisions = payload.get("decisions") or []
-    if decisions:
-        st.subheader("Decisions")
-        st.dataframe(
-            pd.DataFrame([
-                {"symbol": row["symbol"], "action": row["action"], "qty": row["qty"], "reason": row["reason"]}
-                for row in decisions
-            ]),
-            hide_index=True,
-            width="stretch",
-        )
-    orders = payload.get("orders") or []
-    if orders:
-        st.subheader("Orders from this run")
-        st.dataframe(pd.DataFrame(orders), hide_index=True, width="stretch")
+    st.markdown("**Running now**")
+    st.caption(", ".join(running) if running else "None")
+    logs = _grouped(payload.get("log") or [], "symbol")
+    decisions = {row["symbol"]: row for row in payload.get("decisions") or []}
+    orders = _grouped(payload.get("orders") or [], "symbol")
+    ordered: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for company in companies:
+        ordered.append((company.symbol, company.name))
+        seen.add(company.symbol)
+    for symbol in list(logs) + list(decisions) + list(orders):
+        if symbol and symbol not in seen:
+            ordered.append((symbol, symbol))
+            seen.add(symbol)
+    if not ordered:
+        st.caption("Output appears here as each company finishes.")
+        return
+    for symbol, name in ordered:
+        decision = decisions.get(symbol)
+        title = f"{symbol} · {name}"
+        if decision:
+            title = f"{title} · {decision['action']} {decision['qty'] or ''}".strip()
+        with st.expander(title, expanded=False, key=f"{key_prefix}-company-{symbol}", on_change="rerun"):
+            company_log = logs.get(symbol) or []
+            if not company_log and decision is None and not orders.get(symbol):
+                st.caption("Waiting for this company.")
+            for line in company_log:
+                st.markdown(f"**{line['agent']}**")
+                st.text(line.get("text") or "")
+            if decision:
+                st.markdown(f"**Decision** · {decision['action']} {decision['qty'] or ''}".strip())
+                st.text(decision.get("reason") or "")
+            company_orders = orders.get(symbol) or []
+            if company_orders:
+                st.markdown("**Orders**")
+                st.dataframe(pd.DataFrame(company_orders), hide_index=True, width="stretch")
 
 
 def _clock(value: datetime | None) -> str:
@@ -240,14 +242,20 @@ def _next_agent_label() -> str:
 def _render_one(runner: ScheduledRunner) -> None:
     info = runner.view()
     state_label = "Running now" if info["in_run"] else ("Scheduled" if info["active"] else "Stopped")
-    with st.container(border=True):
-        title, action = st.columns([4, 1])
-        title.subheader(info["label"])
+    count = len(info["symbols"])
+    count_label = "company" if count == 1 else "companies"
+    label = info["label"]
+    with st.expander(
+        f"**{label}** · {state_label} · {count} {count_label}",
+        expanded=bool(info["in_run"]),
+        key=f"trading-agent-open-{label}",
+        on_change="rerun",
+    ):
         if info["active"]:
-            if action.button("Stop", icon=":material/stop:", key=f"trading-agent-stop-{info['label']}", width="stretch"):
+            if st.button("Stop", icon=":material/stop:", key=f"trading-agent-stop-{label}"):
                 runner.stop()
                 st.rerun()
-        elif action.button("Dismiss", key=f"trading-agent-dismiss-{info['label']}", width="stretch"):
+        elif st.button("Dismiss", key=f"trading-agent-dismiss-{label}"):
             st.session_state.trading_agent_runners = [item for item in _runners() if item is not runner]
             st.rerun()
         c1, c2, c3, c4 = st.columns(4)
@@ -255,19 +263,25 @@ def _render_one(runner: ScheduledRunner) -> None:
         c2.metric("Schedule", info["schedule"])
         c3.metric("Next run", _clock(info["next_run_at"]))
         c4.metric("Completed runs", info["run_count"])
-        symbols = ", ".join(info["symbols"]) or "none"
-        st.caption(f"Companies on this schedule: {symbols}. Last finished {_clock(info['last_finished'])}.")
+        st.caption(f"Last finished {_clock(info['last_finished'])}.")
         if info["error"]:
             st.error(info["error"])
         if info["latest"]:
-            _paint(info["latest"])
+            _paint(info["latest"], runner.companies, f"trading-agent-{label}")
         elif info["active"]:
             st.caption("Waiting for the first pass.")
+            for company in runner.companies:
+                with st.expander(
+                    f"{company.symbol} · {company.name}",
+                    expanded=False,
+                    key=f"trading-agent-{label}-company-{company.symbol}",
+                    on_change="rerun",
+                ):
+                    st.caption("Waiting for this company.")
 
 
 def _render_roster(runners: list[ScheduledRunner]) -> None:
     if not runners:
-        st.caption("Start the agent to see the workers.")
         return
     for runner in runners:
         _render_one(runner)
@@ -307,27 +321,59 @@ else:
     st.info("The company list is not loaded. Open Companies and refresh the list, then come back.")
 
 st.subheader("Companies on this agent")
-st.caption(f"{len(book)} of {MAX_COMPANIES}. The desk runs this list when you start the agent.")
+count_label = "company" if len(book) == 1 else "companies"
+st.caption(f"{len(book)} {count_label}. The desk runs this list when you start the agent.")
 if book:
-    st.dataframe(pd.DataFrame(book), hide_index=True, width="stretch")
-    remove = st.multiselect("Remove", [row["symbol"] for row in book], key="trading-agent-remove")
-    if st.button("Remove selected", disabled=not remove):
-        st.session_state.trading_agent_book = [row for row in book if row["symbol"] not in set(remove)]
-        st.rerun()
+    for row in book:
+        symbol = row["symbol"]
+        with st.expander(
+            f"**{symbol}** · {row.get('name') or symbol}",
+            expanded=False,
+            key=f"trading-agent-book-{symbol}",
+            on_change="rerun",
+        ):
+            st.write(row.get("sector") or "No sector")
+            if st.button("Remove", key=f"trading-agent-remove-one-{symbol}"):
+                st.session_state.trading_agent_book = [item for item in book if item["symbol"] != symbol]
+                st.rerun()
 else:
     st.caption("No companies yet.")
 
 st.subheader("Schedule")
 runners = _runners()
 active = any(runner.active for runner in runners)
-choice_labels = [label for label, _minutes in SCHEDULE_CHOICES]
+choice_labels = [label for label, _cadence, _minutes in SCHEDULE_CHOICES]
 choice = st.selectbox("Run", choice_labels, index=1)
-every_minutes = dict(SCHEDULE_CHOICES)[choice]
+_label, cadence, every_minutes = next(row for row in SCHEDULE_CHOICES if row[0] == choice)
 daily_at = None
-if every_minutes is None:
-    daily_at = st.time_input("Time", value=time(9, 30))
+if cadence in {"daily", "monthly", "quarterly"}:
+    daily_at = st.time_input("Time", value=time(9, 30), key="trading-agent-clock")
+    if cadence == "monthly":
+        st.caption("Day 1 of each month, at this time.")
+    elif cadence == "quarterly":
+        st.caption("Day 1 of January, April, July, and October, at this time.")
 if active:
     st.caption("Agents already running keep the companies and schedule they started with.")
+
+def _make_desk(orders_path):
+    """Build a desk from the current module.
+
+    A Streamlit process keeps the first import. If that copy still refuses
+    more than five companies, reload the module once and use the new class.
+    """
+    import importlib
+
+    import agents.agno.trading_desk as trading_desk
+
+    run = trading_desk.TradingDesk.run
+    stale = any(
+        isinstance(item, str) and "companies at a time" in item
+        for item in run.__code__.co_consts
+    )
+    if stale:
+        trading_desk = importlib.reload(trading_desk)
+    return trading_desk.TradingDesk(orders_path=orders_path)
+
 
 start_label = "Start new agent" if active else "Start agent"
 if st.button(
@@ -336,12 +382,13 @@ if st.button(
     icon=":material/play_arrow:",
     disabled=not book,
 ):
-    schedule = DeskSchedule(every_minutes=every_minutes, daily_at=daily_at)
+    schedule = DeskSchedule(every_minutes=every_minutes, daily_at=daily_at, cadence=cadence)
     companies = [DeskCompany(row["symbol"], row["name"], row.get("sector", "")) for row in book]
     started = ScheduledRunner(
         companies,
         schedule,
         orders_path=DEFAULT_ORDERS,
+        desk_factory=lambda: _make_desk(DEFAULT_ORDERS),
         label=_next_agent_label(),
     )
     started.start(immediate=True)

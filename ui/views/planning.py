@@ -13,6 +13,25 @@ from data.feed import DataFeed
 from execution.portfolio_service import PortfolioBackend
 from planning.backtest import BENCHMARK, SLEEVE_PROXIES, proxy_symbols, run_plan_backtest
 from planning.optimize import PlanTargets, improve_plan
+import importlib
+
+import planning.model as plan_model
+import planning.store as plan_store
+
+if "capital" not in plan_model.Plan.__dataclass_fields__:
+    plan_model = importlib.reload(plan_model)
+    plan_store = importlib.reload(plan_store)
+
+from planning.funds import (
+    FundError,
+    FundsStore,
+    allocated_total,
+    assign_plan_capital,
+    set_total_funds,
+    top_up_plan,
+    top_up_portfolio,
+    unallocated_cash,
+)
 from planning.model import (
     EQUITY_BUCKETS,
     HORIZONS,
@@ -32,6 +51,7 @@ from ui.components import theme as t
 from ui.components import widgets
 
 store = PlanStore()
+funds_store = FundsStore()
 backend = PortfolioBackend()
 
 
@@ -325,25 +345,150 @@ def _number_columns() -> dict:
 
 
 st.title("Planning")
-st.caption("Target mix for how the portfolio should be split. Plans are saved as JSON in data/plans.")
+st.caption("Each plan is an account. It takes cash, or a percent of cash, from the portfolio total. Plans are saved as JSON in data/plans.")
 
 if st.session_state.pop("_clear_plan", False):
     st.session_state.pop("plan_id", None)
 
+funds = funds_store.load()
 plans = store.list_plans()
+
+pending_set = st.session_state.pop("_pending_set_funds", None)
+if pending_set is not None:
+    try:
+        set_total_funds(funds, pending_set, plans)
+        funds_store.save(funds)
+        st.session_state["_funds_notice"] = f"Portfolio funds are {funds.currency} {funds.initial_funds:,.2f}."
+    except FundError as exc:
+        st.session_state["_funds_error"] = str(exc)
+
+pending_portfolio_topup = st.session_state.pop("_pending_portfolio_topup", None)
+if pending_portfolio_topup is not None:
+    try:
+        top_up_portfolio(funds, pending_portfolio_topup)
+        funds_store.save(funds)
+        st.session_state["_funds_notice"] = (
+            f"Top-up added. Portfolio initial funds are {funds.currency} {funds.initial_funds:,.2f}."
+        )
+    except FundError as exc:
+        st.session_state["_funds_error"] = str(exc)
+
+pending_plan_topup = st.session_state.pop("_pending_plan_topup", None)
+if isinstance(pending_plan_topup, dict):
+    target = store.load(str(pending_plan_topup.get("id") or ""))
+    if target is None:
+        st.session_state["_funds_error"] = "That plan is no longer saved."
+    else:
+        try:
+            top_up_plan(funds, target, float(pending_plan_topup.get("amount") or 0))
+            funds_store.save(funds)
+            store.save(target)
+            st.session_state["_plan_form"] = None
+            st.session_state["_funds_notice"] = (
+                f"Top-up added to {target.name}. "
+                f"Its initial funds are {target.currency} {target.initial_funds:,.2f}. "
+                f"Portfolio initial funds are {funds.currency} {funds.initial_funds:,.2f}."
+            )
+        except FundError as exc:
+            st.session_state["_funds_error"] = str(exc)
+    funds = funds_store.load()
+    plans = store.list_plans()
+
+notice = st.session_state.pop("_funds_notice", None)
+problem = st.session_state.pop("_funds_error", None)
+if notice:
+    st.success(notice)
+if problem:
+    st.error(problem)
+
+allocated = allocated_total(plans)
+idle_cash = unallocated_cash(funds, plans)
+fund_cols = st.columns(3)
+fund_cols[0].metric("Portfolio initial funds", f"{funds.currency} {funds.initial_funds:,.2f}", border=True)
+fund_cols[1].metric("Allocated to plans", f"{funds.currency} {allocated:,.2f}", border=True)
+fund_cols[2].metric("Unallocated cash", f"{funds.currency} {idle_cash:,.2f}", border=True)
+st.caption(
+    "Initial funds are the reference balance. They rise on a top-up and stay on record "
+    "when cash moves back out of a plan. Unallocated cash is the portfolio total minus what the plans hold."
+)
+
+funded_plans = any(plan.capital > 0 for plan in plans)
+fund_left, fund_right = st.columns(2)
+with fund_left:
+    if "portfolio_opening_funds" not in st.session_state:
+        st.session_state["portfolio_opening_funds"] = float(funds.initial_funds)
+    opening = st.number_input(
+        "Total available funds",
+        min_value=0.0,
+        step=1000.0,
+        disabled=funded_plans,
+        key="portfolio_opening_funds",
+        help="Set this before the first plan takes cash. After that, add cash with a top-up.",
+    )
+    if st.button("Set total funds", disabled=funded_plans):
+        st.session_state["_pending_set_funds"] = float(opening)
+        st.rerun()
+with fund_right:
+    portfolio_topup = st.number_input(
+        "Top up portfolio",
+        min_value=0.0,
+        step=1000.0,
+        key="portfolio_topup_amount",
+        help="New cash. This increases the portfolio's initial funds and stays unallocated until a plan takes it.",
+    )
+    if st.button("Add portfolio top-up"):
+        st.session_state["_pending_portfolio_topup"] = float(portfolio_topup)
+        st.rerun()
+
+if plans:
+    account_rows = [
+        {
+            "Account": plan.name,
+            "Allocated": plan.capital,
+            "Initial funds": plan.initial_funds,
+            "How": f"{plan.allocation_percent:,.2f}%" if plan.allocation_mode == "percent" else "Cash",
+        }
+        for plan in plans
+    ]
+    account_rows.append({
+        "Account": "Unallocated cash",
+        "Allocated": idle_cash,
+        "Initial funds": None,
+        "How": "Cash",
+    })
+    st.dataframe(pd.DataFrame(account_rows), hide_index=True, width="stretch")
+
 create_col, select_col = st.columns([1, 2])
 with create_col:
     with st.form("create_plan", clear_on_submit=True, border=False):
-        new_name = st.text_input("New plan", placeholder="Core portfolio")
+        new_name = st.text_input("New plan", placeholder="Aggressive growth")
+        new_mode = st.radio("New plan takes", ["Cash", "Percent"], horizontal=True)
+        new_cash = st.number_input("Cash for the new plan", min_value=0.0, step=1000.0)
+        new_percent = st.number_input("Percent for the new plan", min_value=0.0, max_value=100.0, step=1.0)
+        st.caption("The choice above decides which number is used. It has to fit in the unallocated cash.")
         submitted = st.form_submit_button("Create plan", type="primary", width="stretch")
     if submitted:
         if not new_name.strip():
             st.warning("Give the plan a name.")
         else:
             created = store.create(new_name.strip())
-            st.session_state["plan_id"] = created.id
-            st.session_state.pop("_plan_form", None)
-            st.rerun()
+            try:
+                assign_plan_capital(
+                    created,
+                    store.list_plans(),
+                    funds,
+                    "percent" if new_mode == "Percent" else "cash",
+                    float(new_cash),
+                    float(new_percent),
+                )
+            except FundError as exc:
+                store.delete(created.id)
+                st.error(str(exc))
+            else:
+                store.save(created)
+                st.session_state["plan_id"] = created.id
+                st.session_state.pop("_plan_form", None)
+                st.rerun()
 
 if not plans:
     st.info("Create a plan to set geography, asset, and sector targets.", icon=":material/info:")
@@ -383,6 +528,10 @@ def _bind_form(current: Plan) -> None:
     st.session_state["plan_band"] = float(current.rebalance_band_pct)
     st.session_state["plan_contribution"] = float(current.monthly_contribution)
     st.session_state["plan_notes"] = current.notes
+    st.session_state["plan_allocation_mode"] = "Percent" if current.allocation_mode == "percent" else "Cash"
+    st.session_state["plan_allocation_cash"] = float(current.capital)
+    st.session_state["plan_allocation_percent"] = float(current.allocation_percent)
+    st.session_state["plan_topup"] = 0.0
     try:
         st.session_state["plan_review"] = date.fromisoformat(current.review_date) if current.review_date else None
     except ValueError:
@@ -464,6 +613,37 @@ with rules:
     review = st.date_input("Next review", key="plan_review")
     contribution = st.number_input("Monthly contribution", min_value=0.0, step=100.0, key="plan_contribution")
     notes = st.text_area("Notes", height=88, key="plan_notes")
+
+st.subheader("Account")
+st.caption(
+    "Cash in this plan comes from the portfolio total. "
+    f"Initial funds on record: {plan.currency} {plan.initial_funds:,.2f}. "
+    "That reference rises when you assign more cash or top up, and it stays when you move cash back."
+)
+account_mode = st.radio("Allocate by", ["Cash", "Percent"], horizontal=True, key="plan_allocation_mode")
+account_cash = st.number_input(
+    "Cash amount",
+    min_value=0.0,
+    step=1000.0,
+    key="plan_allocation_cash",
+)
+account_percent = st.number_input(
+    "Percent of total funds",
+    min_value=0.0,
+    max_value=100.0,
+    step=1.0,
+    key="plan_allocation_percent",
+)
+plan_topup = st.number_input(
+    "Top up this plan",
+    min_value=0.0,
+    step=1000.0,
+    key="plan_topup",
+    help="New cash into this account. The portfolio initial funds and this plan's initial funds both rise.",
+)
+if st.button("Add plan top-up"):
+    st.session_state["_pending_plan_topup"] = {"id": plan.id, "amount": float(plan_topup)}
+    st.rerun()
 
 mix_notice = st.session_state.pop("_mix_notice", None)
 if mix_notice:
@@ -571,6 +751,10 @@ draft = Plan(
     monthly_contribution=float(contribution),
     notes=notes.strip(),
     classifications=classifications,
+    capital=plan.capital,
+    initial_funds=plan.initial_funds,
+    allocation_mode=plan.allocation_mode,
+    allocation_percent=plan.allocation_percent,
     created_at=plan.created_at,
     updated_at=plan.updated_at,
 )
@@ -578,6 +762,18 @@ draft = Plan(
 errors = slice_errors(draft.buckets, "Sleeves") + slice_errors(draft.sectors, "Sectors")
 if not draft.name:
     errors.append("The plan needs a name.")
+try:
+    assign_plan_capital(
+        draft,
+        plans,
+        funds,
+        "percent" if account_mode == "Percent" else "cash",
+        float(account_cash),
+        float(account_percent),
+        allow_zero=True,
+    )
+except FundError as exc:
+    errors.append(str(exc))
 for message in errors:
     st.error(message)
 
@@ -592,7 +788,11 @@ with delete_col:
         st.session_state["confirm_delete"] = plan.id
 
 if st.session_state.get("confirm_delete") == plan.id:
-    st.warning(f"Delete {plan.name}? The JSON file is removed.")
+    st.warning(
+        f"Delete {plan.name}? The JSON file is removed. "
+        f"{plan.currency} {plan.capital:,.2f} goes back to unallocated cash. "
+        "The portfolio's initial funds stay the same."
+    )
     if st.button("Confirm delete"):
         store.delete(plan.id)
         st.session_state["_clear_plan"] = True

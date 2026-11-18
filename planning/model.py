@@ -114,6 +114,10 @@ class Plan:
     monthly_contribution: float = 0
     notes: str = ""
     classifications: dict[str, dict[str, str]] = field(default_factory=dict)
+    capital: float = 0
+    initial_funds: float = 0
+    allocation_mode: str = "cash"
+    allocation_percent: float = 0
     created_at: str = ""
     updated_at: str = ""
 
@@ -136,6 +140,12 @@ class Plan:
                 "notes": self.notes,
             },
             "classifications": self.classifications,
+            "account": {
+                "capital": self.capital,
+                "initial_funds": self.initial_funds,
+                "allocation_mode": self.allocation_mode,
+                "allocation_percent": self.allocation_percent,
+            },
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -143,6 +153,7 @@ class Plan:
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "Plan":
         rules = raw.get("rules") or {}
+        account = raw.get("account") or {}
         tags = raw.get("classifications") or {}
         clean_tags: dict[str, dict[str, str]] = {}
         if isinstance(tags, dict):
@@ -169,6 +180,10 @@ class Plan:
             monthly_contribution=float(rules.get("monthly_contribution") or 0),
             notes=str(rules.get("notes") or ""),
             classifications=clean_tags,
+            capital=float(account.get("capital") or 0),
+            initial_funds=float(account.get("initial_funds") or 0),
+            allocation_mode=str(account.get("allocation_mode") or "cash"),
+            allocation_percent=float(account.get("allocation_percent") or 0),
             created_at=str(raw.get("created_at") or ""),
             updated_at=str(raw.get("updated_at") or ""),
         )

@@ -25,5 +25,284 @@
     "status": "queued",
     "submitted_at": "2026-11-14T23:19:31",
     "route": "paper blotter"
+  },
+  {
+    "symbol": "AFL",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent buy +0.55; Web signal agent buy +0.50. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T18:17:21",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "AFL",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent buy +0.55; Web signal agent buy +0.50. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T18:47:18",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "AAPL",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent buy +0.55; Web signal agent buy +0.50. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T19:05:47",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "AAPL",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent buy +0.55; Web signal agent buy +0.50. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T19:14:51",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "ANET",
+    "side": "SELL",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent sell -0.55; Web signal agent sell -0.50. 2 sources agree on sell and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T19:14:52",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "DVN",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent flat +0.00. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T19:16:29",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "DVN",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent flat +0.00. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T19:47:49",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "DVN",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent flat +0.00. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T20:16:36",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "DVN",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent flat +0.00. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T20:46:31",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "DVN",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent flat +0.00. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T21:16:30",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "DVN",
+    "side": "BUY",
+    "qty": 15,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent buy +0.50. 3 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:00:23",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "EOG",
+    "side": "BUY",
+    "qty": 15,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent buy +0.50. 3 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:00:26",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "HAL",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent flat +0.00. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:00:32",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "MPC",
+    "side": "SELL",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent sell -0.35; Web signal agent sell -0.50. 2 sources agree on sell and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:00:36",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "PSX",
+    "side": "SELL",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent sell -0.35; Web signal agent sell -0.50. 2 sources agree on sell and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:00:41",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "SLB",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent buy +0.67. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:00:43",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "TRGP",
+    "side": "BUY",
+    "qty": 15,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent buy +0.67. 3 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:00:44",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "DVN",
+    "side": "BUY",
+    "qty": 15,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent buy +0.50. 3 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:01:32",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "EOG",
+    "side": "BUY",
+    "qty": 15,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent buy +0.50. 3 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:01:35",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "HAL",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent flat +0.00. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:01:41",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "MPC",
+    "side": "SELL",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent sell -0.35; Web signal agent sell -0.50. 2 sources agree on sell and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:01:43",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "PSX",
+    "side": "SELL",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent sell -0.35; Web signal agent sell -0.50. 2 sources agree on sell and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:01:48",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "SLB",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent buy +0.67. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:01:50",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "TRGP",
+    "side": "BUY",
+    "qty": 15,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent buy +0.67. 3 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:01:53",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "BBY",
+    "side": "BUY",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent buy +0.45; Web signal agent buy +0.67. 2 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:10:40",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "DVN",
+    "side": "BUY",
+    "qty": 15,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent buy +0.50. 3 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:16:30",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "DVN",
+    "side": "BUY",
+    "qty": 15,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent buy +0.50. 3 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:16:34",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "EOG",
+    "side": "BUY",
+    "qty": 15,
+    "reason": "Fundamental signal agent buy +0.50; Social signal agent flat +0.00; Technical signal agent buy +0.10; Web signal agent buy +0.50. 3 sources agree on buy and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-15T22:16:37",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "AXON",
+    "side": "SELL",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent sell -0.55; Web signal agent sell -0.50. 2 sources agree on sell and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-16T21:42:32",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "AXON",
+    "side": "SELL",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent sell -0.55; Web signal agent sell -0.50. 2 sources agree on sell and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-17T20:12:25",
+    "route": "paper blotter"
+  },
+  {
+    "symbol": "BE",
+    "side": "SELL",
+    "qty": 10,
+    "reason": "Fundamental signal agent flat +0.00; Social signal agent flat +0.00; Technical signal agent sell -0.55; Web signal agent sell -0.50. 2 sources agree on sell and none oppose.",
+    "status": "queued",
+    "submitted_at": "2026-11-17T20:12:26",
+    "route": "paper blotter"
   }
 ]

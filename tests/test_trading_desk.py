@@ -207,11 +207,20 @@ def test_schedule_labels_and_triggers():
     assert DeskSchedule(every_minutes=60).label() == "every 1 hour"
     daily = DeskSchedule(every_minutes=None, daily_at=time(9, 30))
     assert daily.label() == "daily at 09:30"
+    monthly = DeskSchedule(every_minutes=None, daily_at=time(9, 30), cadence="monthly")
+    assert monthly.label() == "monthly on day 1 at 09:30"
+    quarterly = DeskSchedule(every_minutes=None, daily_at=time(16, 15), cadence="quarterly")
+    assert quarterly.label() == "quarterly on day 1 (Jan, Apr, Jul, Oct) at 16:15"
     assert isinstance(trigger_for(interval), IntervalTrigger)
     assert trigger_for(interval).interval == timedelta(minutes=15)
     cron = trigger_for(daily)
     assert isinstance(cron, CronTrigger)
     assert "hour='9'" in str(cron) and "minute='30'" in str(cron)
+    monthly_cron = str(trigger_for(monthly))
+    assert "day='1'" in monthly_cron and "hour='9'" in monthly_cron and "minute='30'" in monthly_cron
+    quarterly_cron = str(trigger_for(quarterly))
+    assert "month='1,4,7,10'" in quarterly_cron and "day='1'" in quarterly_cron
+    assert "hour='16'" in quarterly_cron and "minute='15'" in quarterly_cron
 
 
 def test_scheduled_runner_keeps_a_future_run_and_can_stop(tmp_path):
